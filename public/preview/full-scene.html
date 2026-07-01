@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Riftbound — Full scene preview</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        background: #05070c;
+        display: grid;
+        place-items: center;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+
+      .stage {
+        position: relative;
+        width: min(100vw, calc(100vh * 16 / 9));
+        aspect-ratio: 16 / 9;
+        overflow: hidden;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+      }
+
+      .bg-base {
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(ellipse 80% 60% at 50% 0%, rgba(42, 88, 180, 0.35), transparent 60%),
+          radial-gradient(ellipse 50% 40% at 10% 100%, rgba(201, 162, 39, 0.12), transparent 55%),
+          radial-gradient(ellipse 50% 40% at 90% 100%, rgba(201, 162, 39, 0.12), transparent 55%),
+          linear-gradient(165deg, #0a0e18 0%, #0d1220 40%, #080b12 100%);
+      }
+
+      .bg-grid {
+        position: absolute;
+        inset: 0;
+        opacity: 0.07;
+        background-image:
+          linear-gradient(rgba(106, 166, 255, 0.5) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(106, 166, 255, 0.5) 1px, transparent 1px);
+        background-size: 4% 7.1%;
+      }
+
+      .bg-vignette {
+        position: absolute;
+        inset: 0;
+        box-shadow: inset 0 0 18% rgba(0, 0, 0, 0.75);
+        pointer-events: none;
+      }
+
+      .top-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 8%;
+        background: linear-gradient(180deg, rgba(8, 12, 22, 0.95), rgba(8, 12, 22, 0.4));
+        border-bottom: 1px solid rgba(106, 166, 255, 0.25);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 5;
+      }
+
+      .event-tag {
+        position: absolute;
+        left: 2.5%;
+        font-size: clamp(10px, 1.1vw, 14px);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #8fa8cc;
+      }
+
+      .score-pill {
+        padding: 0.5% 2%;
+        border-radius: 999px;
+        background: rgba(15, 22, 38, 0.85);
+        border: 1px solid rgba(106, 166, 255, 0.45);
+        color: #fff;
+        font-weight: 800;
+        font-size: clamp(18px, 2.2vw, 28px);
+        font-variant-numeric: tabular-nums;
+        box-shadow: 0 0 20px rgba(106, 166, 255, 0.15);
+      }
+
+      .score-pill span {
+        color: #6aa6ff;
+      }
+
+      .game-tag {
+        position: absolute;
+        right: 2.5%;
+        font-size: clamp(10px, 1.1vw, 14px);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #c9a227;
+        font-weight: 700;
+      }
+
+      /* ---- Player columns ---- */
+      .col {
+        position: absolute;
+        top: 10%;
+        bottom: 2%;
+        width: 16%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1%;
+        z-index: 3;
+      }
+
+      .col-p1 {
+        left: 2%;
+      }
+      .col-p2 {
+        right: 2%;
+      }
+
+      .pseudo {
+        font-size: clamp(14px, 1.6vw, 22px);
+        font-weight: 800;
+        color: #fff;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+        flex-shrink: 0;
+      }
+
+      .card-slot {
+        width: 100%;
+        flex: 1 1 0;
+        min-height: 0;
+        max-height: 28%;
+        border-radius: 8px;
+        background: linear-gradient(145deg, rgba(30, 45, 80, 0.9), rgba(12, 18, 32, 0.95));
+        border: 1px solid rgba(106, 166, 255, 0.35);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #5a7090;
+        font-size: clamp(8px, 0.75vw, 11px);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .card-slot.legend {
+        border-color: rgba(201, 162, 39, 0.5);
+        box-shadow: 0 0 20px rgba(201, 162, 39, 0.12);
+        aspect-ratio: 744 / 1039;
+        flex: 0 1 auto;
+        max-height: 32%;
+      }
+
+      .card-slot.bf {
+        aspect-ratio: 1039 / 744;
+        flex: 0 1 auto;
+        max-height: 18%;
+      }
+
+      .card-slot.on-demand {
+        border-color: rgba(106, 166, 255, 0.65);
+        box-shadow: 0 0 24px rgba(106, 166, 255, 0.2);
+        color: #8fb8ff;
+        aspect-ratio: 744 / 1039;
+        flex: 0 1 auto;
+        max-height: 26%;
+      }
+
+      .slot-lbl {
+        font-size: clamp(8px, 0.65vw, 10px);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #6aa6ff;
+        flex-shrink: 0;
+      }
+
+      .champion {
+        font-size: clamp(9px, 0.95vw, 13px);
+        font-weight: 700;
+        color: #dce6f5;
+        text-align: center;
+        padding: 2% 4%;
+        background: rgba(12, 18, 32, 0.7);
+        border-radius: 6px;
+        border: 1px solid rgba(106, 166, 255, 0.2);
+        width: 100%;
+        flex-shrink: 0;
+      }
+
+      /* ---- Play area — full height between player columns ---- */
+      .center-wrap {
+        position: absolute;
+        left: calc(2% + 16% + 0.6%);
+        right: calc(2% + 16% + 0.6%);
+        top: 9%;
+        bottom: 2%;
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        z-index: 2;
+      }
+
+      .center {
+        position: relative;
+        height: 100%;
+        width: auto;
+        max-width: 100%;
+        aspect-ratio: 744 / 1039;
+        border: 2px solid rgba(106, 166, 255, 0.35);
+        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(10, 16, 28, 0.65), rgba(6, 10, 18, 0.85));
+        box-shadow:
+          0 0 0 1px rgba(201, 162, 39, 0.15),
+          0 16px 48px rgba(0, 0, 0, 0.5),
+          inset 0 0 60px rgba(106, 166, 255, 0.05);
+      }
+
+      .center-label {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: rgba(120, 140, 170, 0.5);
+        font-size: clamp(11px, 1.1vw, 15px);
+        letter-spacing: 0.08em;
+        line-height: 1.65;
+        text-transform: uppercase;
+      }
+
+      .games-won {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        text-align: center;
+        padding: 2% 0 1.5%;
+        background: linear-gradient(180deg, transparent 0%, rgba(8, 12, 22, 0.95) 45%);
+        font-size: clamp(10px, 1vw, 13px);
+        color: #8fa8cc;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .games-won strong {
+        color: #c9a227;
+      }
+
+      .note {
+        position: fixed;
+        bottom: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #667;
+        font-size: 12px;
+        text-align: center;
+        max-width: 90%;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage">
+      <div class="bg-base"></div>
+      <div class="bg-grid"></div>
+      <div class="bg-vignette"></div>
+
+      <header class="top-bar">
+        <span class="event-tag">Riftbound · Bo3</span>
+        <div class="score-pill"><span>8</span> – <span>5</span></div>
+        <span class="game-tag">Game 2</span>
+      </header>
+
+      <aside class="col col-p1">
+        <div class="pseudo">Loïc</div>
+        <span class="slot-lbl">Legend</span>
+        <div class="card-slot legend">Legend</div>
+        <span class="slot-lbl">Battlefield</span>
+        <div class="card-slot bf">Battlefield</div>
+        <span class="slot-lbl">On demand</span>
+        <div class="card-slot on-demand">Card</div>
+        <div class="champion">Pyke, Dockside Butcher</div>
+      </aside>
+
+      <aside class="col col-p2">
+        <div class="pseudo">Kelvin</div>
+        <span class="slot-lbl">Legend</span>
+        <div class="card-slot legend">Legend</div>
+        <span class="slot-lbl">Battlefield</span>
+        <div class="card-slot bf">Battlefield</div>
+        <span class="slot-lbl">On demand</span>
+        <div class="card-slot on-demand">Card</div>
+        <div class="champion">LeBlanc, Fragmented</div>
+      </aside>
+
+      <div class="center-wrap">
+        <div class="center">
+          <div class="center-label">Play area<br />Table cam</div>
+          <div class="games-won">Match · <strong>1 – 0</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      Preview — full-scene theme (100% CSS). Play area fills the vertical space between both players.
+    </p>
+  </body>
+</html>

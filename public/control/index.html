@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Riftbound — Control Panel</title>
+    <link rel="stylesheet" href="control.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Riftbound <span>Control</span></h1>
+      <nav class="tabs">
+        <button class="tab active" data-tab="setup">Players &amp; Decks</button>
+        <button class="tab" data-tab="match">Match</button>
+        <button class="tab" data-tab="streamdeck">Stream Deck</button>
+        <button class="tab" data-tab="layout">Layout</button>
+      </nav>
+      <span class="app-version" id="app-version"></span>
+      <a class="overlay-link" href="/overlay" target="_blank" rel="noopener">Open overlay</a>
+    </header>
+
+    <div id="update-banner" class="update-banner hidden" role="status">
+      <div class="update-banner-text">
+        <strong id="update-banner-title">Update available</strong>
+        <span id="update-banner-detail" class="hint"></span>
+        <pre id="update-banner-notes" class="update-notes hidden"></pre>
+      </div>
+      <div class="update-banner-actions">
+        <button type="button" class="btn small" id="update-download">Download</button>
+        <button type="button" class="btn small" id="update-apply" disabled>Install &amp; restart</button>
+        <button type="button" class="btn ghost small" id="update-dismiss">Dismiss</button>
+      </div>
+    </div>
+
+    <main>
+      <!-- ============ SETUP ============ -->
+      <section id="tab-setup" class="panel active">
+        <div class="players-grid" id="players-grid"></div>
+      </section>
+
+      <!-- ============ MATCH ============ -->
+      <section id="tab-match" class="panel">
+        <div class="match-top">
+        <div class="card-block">
+          <div class="row" style="justify-content: space-between; align-items: center">
+            <h2>Score &amp; Game</h2>
+            <div class="row">
+              <span class="inline-lbl">Format</span>
+              <select id="match-format" style="width: auto">
+                <option value="bo1">Bo1</option>
+                <option value="bo3">Bo3</option>
+                <option value="bo5">Bo5</option>
+              </select>
+              <button class="btn danger small" id="reset-match">Reset match</button>
+            </div>
+          </div>
+          <div class="match-tally" id="match-tally"></div>
+          <div class="score-row" id="score-row"></div>
+          <div class="game-row">
+            <span>Current game:</span>
+            <div class="game-buttons" id="game-buttons"></div>
+            <span class="winner-note" id="winner-note"></span>
+          </div>
+          <p class="hint" style="margin-top: 12px">
+            Shortcuts (when not typing): ← / → previous/next game · A = P1 wins game ·
+            P = P2 wins game · M = matchup · H / Esc = hide
+          </p>
+        </div>
+        </div>
+        <div class="selection-grid" id="selection-grid"></div>
+        <div class="card-block">
+          <h2>Display on screen</h2>
+          <div class="display-anim-row">
+            <span class="inline-lbl">Card animation</span>
+            <select id="card-animation" style="width: auto">
+              <option value="none">None (instant)</option>
+              <option value="fade">Fade in</option>
+              <option value="slide">Slide in (from side)</option>
+              <option value="pop">Pop (bounce)</option>
+              <option value="flip">Flip reveal</option>
+              <option value="glow">Arcane glow</option>
+              <option value="impact">Impact slam</option>
+            </select>
+            <span class="hint">Plays when a card is shown or when you change the style.</span>
+          </div>
+          <div class="display-grid" id="display-grid"></div>
+          <div class="row">
+            <button class="btn" id="show-matchup">Show matchup</button>
+            <button class="btn danger" id="hide-card">Hide all cards</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STREAM DECK ============ -->
+      <section id="tab-streamdeck" class="panel">
+        <div class="card-block sd-setup">
+          <h2>Stream Deck — ready to use</h2>
+          <p class="hint sd-intro">
+            Install the plugin once, then download a profile generated from your current decks.
+            Every card becomes a button with its art — no URLs to copy. Re-download after deck changes.
+          </p>
+
+          <ol class="sd-steps">
+            <li>
+              <strong>Install the plugin first</strong> — Windows: double-click
+              <code class="sd-cmd">Install Stream Deck plugin.bat</code>
+              in the app folder. Then <strong>quit and reopen</strong> Stream Deck completely.
+            </li>
+            <li>
+              <strong>Verify the plugin</strong> — drag any action onto a key. You must see a
+              <strong>Riftbound OBS</strong> category (Show Card, Matchup…). If missing, fix step 1 before importing.
+            </li>
+            <li>
+              <strong>Download the profile</strong> — pick the device that matches <em>your</em> hardware
+              (15-key classic = Standard, not XL). Click Download profile.
+            </li>
+            <li>
+              <strong>Import</strong> — double-click the file, click Install. Then in Stream Deck:
+              select your device on the <strong>left</strong>, open the <strong>profile dropdown at the top</strong>,
+              choose <strong>Riftbound OBS</strong>. Or: Settings → Profiles → look for Riftbound OBS.
+            </li>
+          </ol>
+
+          <p class="hint sd-warn">
+            Yellow triangle on a key? The Riftbound app is not running — launch
+            <code class="sd-cmd">Start Riftbound.bat</code> and keep that window open while streaming.
+            Reinstall the plugin after updating the app zip.
+          </p>
+
+          <div class="sd-download-row">
+            <span class="inline-lbl">Device</span>
+            <select id="sd-device" style="width: auto">
+              <option value="xl">Stream Deck XL — 32 keys (8×4)</option>
+              <option value="standard">Stream Deck — 15 keys (5×3)</option>
+              <option value="mini">Stream Deck Mini — 6 keys</option>
+            </select>
+            <button type="button" class="btn" id="sd-download-profile">Download profile</button>
+          </div>
+
+          <p class="hint" id="sd-deck-status"></p>
+
+          <h3>What's included</h3>
+          <ul class="sd-list hint">
+            <li>Page 1 — Controls, game switch, P1/P2 battlefields for the current game</li>
+            <li>◀ Prev / Next ▶ navigation on every page</li>
+            <li>One page per player — every deck card as a button (with card image)</li>
+            <li>Extra pages if the deck has more cards than your device grid</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ============ LAYOUT ============ -->
+      <section id="tab-layout" class="panel">
+        <div class="layout-toolbar">
+          <button class="btn" id="save-layout">Save layout</button>
+          <button class="btn ghost" id="reset-layout">Reset layout</button>
+          <span class="hint">Card frames keep real aspect ratios (744×1039 / 1039×744). Overlay + CSS update live.</span>
+        </div>
+        <div class="layout-wrap">
+          <div class="layout-stage-wrap">
+            <p class="hint">
+              Drag blocks over the live overlay preview. Positions apply instantly in OBS too.
+            </p>
+            <div id="layout-stage" class="layout-stage"></div>
+          </div>
+          <aside class="layout-props">
+            <h2>Properties</h2>
+            <div id="layout-props-body">
+              <p class="hint">Select a block to edit it. The overlay preview updates live as you drag.</p>
+            </div>
+            <h2 class="layout-css-title">Generated CSS</h2>
+            <pre id="layout-css-out" class="layout-css-out"></pre>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+    <script type="module" src="control.js"></script>
+  </body>
+</html>

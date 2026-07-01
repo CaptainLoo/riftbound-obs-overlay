@@ -1,0 +1,33 @@
+{
+  "name": "riftbound-obs-overlay",
+  "version": "0.1.0",
+  "description": "Riftbound stream overlay for OBS (Browser Source) with web control panel.",
+  "type": "module",
+  "main": "server/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CaptainLoo/riftbound-obs-overlay.git"
+  },
+  "riftbound": {
+    "updateRepo": "CaptainLoo/riftbound-obs-overlay"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "build:win": "node scripts/build-win.mjs",
+    "build:patch": "node scripts/build-patch.mjs",
+    "build:streamdeck": "cd streamdeck && npm install && npm run icons && npm run build",
+    "install:streamdeck": "node scripts/install-streamdeck.mjs",
+    "publish": "node scripts/publish-release.mjs",
+    "setup:github": "node scripts/setup-github.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "archiver": "^6.0.2",
+    "express": "^4.19.2",
+    "lowdb": "^7.0.1",
+    "ws": "^8.18.0"
+  }
+}

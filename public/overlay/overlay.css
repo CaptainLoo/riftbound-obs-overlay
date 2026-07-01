@@ -1,0 +1,498 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---- Full-scene theme (background + chrome) ---- */
+.scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+.scene-layer {
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+.bg-base {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(42, 88, 180, 0.35), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 10% 100%, rgba(201, 162, 39, 0.12), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 90% 100%, rgba(201, 162, 39, 0.12), transparent 55%),
+    linear-gradient(165deg, #0a0e18 0%, #0d1220 40%, #080b12 100%);
+}
+
+.bg-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.07;
+  background-image:
+    linear-gradient(rgba(106, 166, 255, 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(106, 166, 255, 0.5) 1px, transparent 1px);
+  background-size: 4% 7.1%;
+}
+
+.bg-vignette {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 18% rgba(0, 0, 0, 0.75);
+  pointer-events: none;
+}
+
+.top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8%;
+  background: linear-gradient(180deg, rgba(8, 12, 22, 0.95), rgba(8, 12, 22, 0.4));
+  border-bottom: 1px solid rgba(106, 166, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+
+.event-tag {
+  position: absolute;
+  left: 2.5%;
+  font-size: clamp(10px, 1.1vw, 14px);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8fa8cc;
+}
+
+.score-pill {
+  padding: 0.5% 2%;
+  border-radius: 999px;
+  background: rgba(15, 22, 38, 0.85);
+  border: 1px solid rgba(106, 166, 255, 0.45);
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(18px, 2.2vw, 28px);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 20px rgba(106, 166, 255, 0.15);
+}
+
+.score-pill span {
+  color: #6aa6ff;
+}
+
+.game-tag {
+  position: absolute;
+  right: 2.5%;
+  font-size: clamp(10px, 1.1vw, 14px);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #c9a227;
+  font-weight: 700;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.slot {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.slot.hidden {
+  display: none !important;
+}
+
+.scene.hidden {
+  display: none;
+}
+
+/* Card frames — size/position come from #layout-runtime-css */
+.slot-image.frame-legend,
+.slot-image.frame-card {
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(30, 45, 80, 0.92), rgba(12, 18, 32, 0.96));
+  border: 1px solid rgba(106, 166, 255, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.slot-image.frame-legend {
+  border-color: rgba(201, 162, 39, 0.55);
+  box-shadow: 0 0 20px rgba(201, 162, 39, 0.14);
+}
+
+.slot-image.frame-card {
+  border-color: rgba(106, 166, 255, 0.65);
+  box-shadow: 0 0 24px rgba(106, 166, 255, 0.2);
+  z-index: 40;
+  perspective: 1400px;
+}
+
+/* Battlefields: clip rounded corners (source thumbs are square with square/white fringe) */
+.slot-image.frame-battlefield {
+  overflow: hidden;
+  border-radius: 4% / 5.5%;
+  background: #0a0e18;
+  border: 1px solid rgba(106, 166, 255, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Play area — transparent hole for OBS camera underneath */
+.slot-chrome.frame-play-area {
+  background: transparent !important;
+  border: 2px solid rgba(106, 166, 255, 0.4);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(201, 162, 39, 0.12),
+    inset 0 0 0 1px rgba(106, 166, 255, 0.08);
+  z-index: 5;
+}
+
+.slot-chrome.frame-play-area::after {
+  content: "Camera";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(10px, 1vw, 14px);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(120, 140, 170, 0.35);
+  pointer-events: none;
+}
+
+/* Match tally — faded strip over the play area */
+.slot-tally.frame-match-tally {
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(8, 12, 22, 0.55) 55%,
+    rgba(8, 12, 22, 0.88) 100%
+  );
+  border: none;
+  z-index: 25;
+  pointer-events: none;
+}
+
+.match-tally-inner {
+  width: 100%;
+  padding: 1vh 0 1.4vh;
+  text-align: center;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8fa8cc;
+  font-weight: 600;
+}
+
+.match-tally-score {
+  color: #c9a227;
+  font-weight: 800;
+}
+
+.slot-image.empty::after {
+  content: attr(data-label);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(8px, 0.75vw, 11px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5a7090;
+  pointer-events: none;
+}
+
+.slot-image.frame-card.empty::after {
+  color: #8fb8ff;
+}
+
+.slot-image img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 0.4vh 1.2vh rgba(0, 0, 0, 0.55));
+}
+
+.slot-image.frame-battlefield img {
+  object-fit: cover;
+  border-radius: inherit;
+  transform: scale(1.02);
+  transform-origin: center center;
+}
+
+.slot-text {
+  color: #fff;
+  font-weight: 700;
+  line-height: 1.1;
+  text-shadow: 0 0.2vh 0.6vh rgba(0, 0, 0, 0.85), 0 0 0.2vh rgba(0, 0, 0, 0.9);
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slot-text.align-left {
+  text-align: left;
+}
+.slot-text.align-center {
+  text-align: center;
+}
+.slot-text.align-right {
+  text-align: right;
+}
+
+#slot-p1-champion,
+#slot-p2-champion {
+  align-items: center;
+  padding: 0.4vh 0.6vw;
+  background: rgba(12, 18, 32, 0.75);
+  border-radius: 6px;
+  border: 1px solid rgba(106, 166, 255, 0.25);
+}
+
+#slot-p1-card,
+#slot-p2-card {
+  z-index: 40;
+}
+
+/* On-demand card reveal animations */
+#slot-p1-card img,
+#slot-p2-card img {
+  transform-origin: center center;
+  will-change: transform, opacity, filter;
+}
+
+#slot-p1-card.anim-fade img,
+#slot-p2-card.anim-fade img {
+  animation: card-fade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+#slot-p1-card.anim-slide.anim-from-left img {
+  animation: card-slide-left 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+#slot-p2-card.anim-slide.anim-from-right img {
+  animation: card-slide-right 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#slot-p1-card.anim-pop img,
+#slot-p2-card.anim-pop img {
+  animation: card-pop 0.62s cubic-bezier(0.34, 1.45, 0.64, 1) both;
+}
+
+#slot-p1-card.anim-flip img,
+#slot-p2-card.anim-flip img {
+  animation: card-flip 0.72s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+#slot-p1-card.anim-glow img,
+#slot-p2-card.anim-glow img {
+  animation: card-glow 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+#slot-p1-card.anim-impact img,
+#slot-p2-card.anim-impact img {
+  animation: card-impact 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes card-fade {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes card-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(-55%) rotate(-6deg) scale(0.88);
+    filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) rotate(0deg) scale(1);
+    filter: drop-shadow(0 0.4vh 1.2vh rgba(0, 0, 0, 0.55));
+  }
+}
+
+@keyframes card-slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(55%) rotate(6deg) scale(0.88);
+    filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) rotate(0deg) scale(1);
+    filter: drop-shadow(0 0.4vh 1.2vh rgba(0, 0, 0, 0.55));
+  }
+}
+
+@keyframes card-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.35);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes card-flip {
+  from {
+    opacity: 0;
+    transform: perspective(1400px) rotateY(-88deg) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(1400px) rotateY(0deg) scale(1);
+  }
+}
+
+@keyframes card-glow {
+  0% {
+    opacity: 0;
+    transform: scale(0.82);
+    filter: drop-shadow(0 0 0 rgba(106, 166, 255, 0)) brightness(1.4);
+  }
+  40% {
+    opacity: 1;
+    filter: drop-shadow(0 0 2.5vh rgba(106, 166, 255, 0.95)) brightness(1.25);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: drop-shadow(0 0.4vh 1.2vh rgba(0, 0, 0, 0.55)) brightness(1);
+  }
+}
+
+@keyframes card-impact {
+  0% {
+    opacity: 0;
+    transform: translateY(-28%) scale(1.18) rotate(-3deg);
+    filter: drop-shadow(0 2vh 2vh rgba(0, 0, 0, 0));
+  }
+  45% {
+    opacity: 1;
+    transform: translateY(4%) scale(0.97) rotate(1deg);
+    filter: drop-shadow(0 0.8vh 1.6vh rgba(0, 0, 0, 0.65));
+  }
+  70% {
+    transform: translateY(-2%) scale(1.02) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+    filter: drop-shadow(0 0.4vh 1.2vh rgba(0, 0, 0, 0.55));
+  }
+}
+
+/* ---- Matchup / deck reveal ---- */
+.matchup {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 80;
+  padding: 6vh 4vw;
+  background: #222222 url("assets/matchup-bg.png") center center / cover no-repeat;
+  color: #fff;
+}
+.matchup.show {
+  display: flex;
+  align-items: stretch;
+  gap: 3vw;
+}
+.mp-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.6vh;
+  min-width: 0;
+}
+.mp-vs {
+  align-self: center;
+  font-size: 6vh;
+  font-weight: 800;
+  color: #6aa6ff;
+  text-shadow: 0 0.3vh 1vh rgba(0, 0, 0, 0.7);
+}
+.mp-pseudo {
+  font-size: 4vh;
+  font-weight: 800;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  text-shadow: 0 0.2vh 0.6vh rgba(0, 0, 0, 0.85);
+}
+.mp-legend img {
+  height: 34vh;
+  border-radius: 1vh;
+  filter: drop-shadow(0 0.6vh 1.6vh rgba(0, 0, 0, 0.6));
+}
+.mp-champion {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6vh;
+}
+.mp-champion img {
+  height: 22vh;
+  border-radius: 1vh;
+  filter: drop-shadow(0 0.5vh 1.2vh rgba(0, 0, 0, 0.6));
+}
+.mp-label {
+  font-size: 1.8vh;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9fb2cc;
+}
+.mp-battlefields {
+  display: flex;
+  gap: 1vw;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.mp-battlefields img {
+  height: 10vh;
+  border-radius: 4% / 5.5%;
+  object-fit: cover;
+  filter: drop-shadow(0 0.4vh 1vh rgba(0, 0, 0, 0.6));
+}

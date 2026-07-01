@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Riftbound Overlay</title>
+    <link rel="stylesheet" href="overlay.css" />
+    <style id="layout-runtime-css"></style>
+  </head>
+  <body>
+    <svg aria-hidden="true" width="0" height="0" style="position: absolute">
+      <defs>
+        <mask id="scene-cutout-mask" maskUnits="objectBoundingBox" maskContentUnits="objectBoundingBox">
+          <rect width="1" height="1" fill="white" />
+          <rect id="scene-hole" fill="black" />
+        </mask>
+      </defs>
+    </svg>
+
+    <div id="scene" class="scene">
+      <div class="bg-base scene-layer"></div>
+      <div class="bg-grid scene-layer"></div>
+      <div class="bg-vignette scene-layer"></div>
+
+      <header class="top-bar">
+        <span class="event-tag" id="scene-event">Riftbound</span>
+        <div class="score-pill">
+          <span id="scene-score-p1">0</span> – <span id="scene-score-p2">0</span>
+        </div>
+        <span class="game-tag" id="scene-game">Game 1</span>
+      </header>
+    </div>
+
+    <div id="stage"></div>
+    <div id="matchup" class="matchup"></div>
+    <script type="module" src="overlay.js"></script>
+  </body>
+</html>
