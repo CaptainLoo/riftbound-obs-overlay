@@ -65,8 +65,15 @@ Develop on macOS, stream on Windows with **in-app updates** (~1 MB patch, not th
 
 ### One-time setup
 
-1. Create a GitHub repo and set `package.json` → `riftbound.updateRepo` to `yourname/riftbound-obs-overlay`.
-2. Install [GitHub CLI](https://cli.github.com/) on your Mac: `gh auth login`.
+1. GitHub repo is configured as **`CaptainLoo/riftbound-obs-overlay`** in `package.json`.
+2. Log in to GitHub CLI once, then run the setup script:
+
+```bash
+gh auth login --web --git-protocol https --scopes repo,read:org
+npm run setup:github          # creates repo, pushes code
+npm run setup:github -- --release   # optional: first GitHub Release for auto-updates
+```
+
 3. On the Windows PC: extract **`riftbound-obs-windows.zip`** once (full install ~34 MB).
 
 ### Daily workflow (Mac)
