@@ -29,7 +29,7 @@ if (!process.env.SKIP_STREAMDECK_BUILD) {
   execSync("npm run build:streamdeck", { cwd: ROOT, stdio: "inherit" });
 }
 copyAppFiles(staging);
-writeWindowsBats(staging, { installMode: "portable" });
+writeWindowsBats(staging, { installMode: "electron" });
 
 rmSync(zipPath, { force: true });
 execSync(`cd "${staging}" && zip -r -q "${zipPath}" .`, { stdio: "inherit" });

@@ -1216,7 +1216,7 @@ async function pollAfterUpdate(expectedVersion) {
     }
   }
   updateDetail.textContent =
-    "Server did not restart. Run Start Riftbound.bat manually, or check %APPDATA%\\RiftboundOBS\\updates\\update.log";
+    "Server did not restart. Launch Riftbound OBS manually, or check %APPDATA%\\RiftboundOBS\\updates\\update.log";
   updateApplyBtn.disabled = false;
 }
 

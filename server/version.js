@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ROOT_DIR } from "./paths.js";
+import { IS_ELECTRON, ROOT_DIR } from "./paths.js";
 
 export function readPackageJson() {
   return JSON.parse(readFileSync(join(ROOT_DIR, "package.json"), "utf8"));
@@ -41,6 +41,9 @@ export function compareSemver(a, b) {
 
 /** Bundled Node version in Windows release (null if not bundled). */
 export function getBundledNodeVersion() {
+  if (IS_ELECTRON) {
+    return process.versions.node;
+  }
   const nodeExe = join(ROOT_DIR, "node", "node.exe");
   if (!existsSync(nodeExe)) return null;
   try {

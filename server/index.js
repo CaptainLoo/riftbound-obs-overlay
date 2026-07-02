@@ -1,14 +1,18 @@
 import { createServer } from "node:http";
 import { exec } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import express from "express";
-import { PUBLIC_DIR, CARDS_DIR, DATA_DIR, IS_RELEASE } from "./paths.js";
+import { PUBLIC_DIR, CARDS_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./paths.js";
 import { initDb } from "./db.js";
 import { initHub } from "./hub.js";
 import { router } from "./routes.js";
 
-const PORT = Number(process.env.PORT) || 7474;
+const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 
-async function main() {
+export async function startServer(options = {}) {
+  const port = Number(options.port) || DEFAULT_PORT;
+  const openBrowser = options.openBrowser ?? (!IS_ELECTRON && IS_RELEASE && process.platform === "win32");
+
   await initDb();
 
   const app = express();
@@ -22,11 +26,7 @@ async function main() {
   app.use(express.json({ limit: "1mb" }));
 
   app.use("/api", router);
-
-  // Cached card images.
   app.use("/cards", express.static(CARDS_DIR, { maxAge: "1h" }));
-
-  // Web UIs.
   app.use("/control", express.static(`${PUBLIC_DIR}/control`));
   app.use("/overlay", express.static(`${PUBLIC_DIR}/overlay`));
   app.use("/shared", express.static(`${PUBLIC_DIR}/shared`));
@@ -36,18 +36,34 @@ async function main() {
   const server = createServer(app);
   initHub(server);
 
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log("Riftbound OBS Overlay");
-    console.log(`  Overlay (Browser Source) : http://localhost:${PORT}/overlay`);
-    console.log(`  Control panel            : http://localhost:${PORT}/control`);
-    if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
-    if (IS_RELEASE && process.platform === "win32") {
-      exec(`start http://localhost:${PORT}/control`);
-    }
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve());
   });
+
+  console.log("Riftbound OBS Overlay");
+  console.log(`  Overlay (Browser Source) : http://localhost:${port}/overlay`);
+  console.log(`  Control panel            : http://localhost:${port}/control`);
+  if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
+
+  if (openBrowser) {
+    exec(`start http://localhost:${port}/control`);
+  }
+
+  const close = () =>
+    new Promise((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+
+  return { server, port, close };
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const isDirectRun =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  startServer().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

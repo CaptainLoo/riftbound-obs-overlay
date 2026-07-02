@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { spawnAppLauncher } from "./launcher.js";
 import {
   acquireLock,
   log,
@@ -59,26 +60,20 @@ export async function applyInstallerUpdate(pending) {
 }
 
 function restartApp(installRoot) {
-  const startBat = join(installRoot, "Start Riftbound.bat");
-  if (!existsSync(startBat)) {
-    log(`Start Riftbound.bat not found in ${installRoot}`);
+  if (spawnAppLauncher(installRoot, { spawnFn: spawn, cwd: installRoot })) {
+    log(`Restarting app from ${installRoot}`);
     return;
   }
-  log(`Restarting app → ${startBat}`);
-  spawn("cmd.exe", ["/c", "start", "Riftbound OBS", "/D", installRoot, startBat], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: false,
-  }).unref();
+  log(`App launcher not found in ${installRoot}`);
 }
 
 function runSilentInstaller(setupPath) {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      setupPath,
-      ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
-      { detached: false, stdio: "inherit", windowsHide: true }
-    );
+    const child = spawn(setupPath, ["/S"], {
+      detached: false,
+      stdio: "inherit",
+      windowsHide: true,
+    });
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve();

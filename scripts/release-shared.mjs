@@ -3,7 +3,7 @@
  * Shared helpers for Windows release / patch builds.
  */
 import { createHash } from "node:crypto";
-import { createReadStream, cpSync, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getVersion, readPackageJson } from "../server/version.js";
@@ -15,6 +15,20 @@ export { ROOT, getVersion, readPackageJson };
 export const NODE_VERSION = "20.18.0";
 export const INNO_APP_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 export const INNO_APP_NAME = "Riftbound OBS";
+
+/** Node version bundled with Electron (for update manifest). */
+export function getManifestNodeVersion() {
+  const versionFile = join(ROOT, "node_modules", "electron", "dist", "version");
+  if (existsSync(versionFile)) {
+    try {
+      const info = JSON.parse(readFileSync(versionFile, "utf8"));
+      if (info.node) return String(info.node).replace(/^v/, "");
+    } catch {
+      /* fall through */
+    }
+  }
+  return NODE_VERSION;
+}
 
 export function getUpdateRepo() {
   const pkg = readPackageJson();
@@ -43,6 +57,87 @@ export function copyAppFiles(outDir) {
 }
 
 export function writeWindowsBats(outDir, { installMode = "portable" } = {}) {
+  if (installMode === "electron") {
+    writeFileSync(
+      join(outDir, "Start Riftbound.bat"),
+      `@echo off
+title Riftbound OBS (debug launcher)
+cd /d "%~dp0"
+start "" "%~dp0Riftbound OBS.exe"
+`,
+      "utf8"
+    );
+
+    writeFileSync(
+      join(outDir, "Update Riftbound.bat"),
+      `@echo off
+title Riftbound OBS — Update
+cd /d "%~dp0"
+echo Waiting for server to stop...
+timeout /t 3 /nobreak >nul
+set ELECTRON_RUN_AS_NODE=1
+set RIFTBOUND_ELECTRON=1
+set RIFTBOUND_INSTALL_ROOT=%~dp0
+"%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
+if errorlevel 1 (
+  echo.
+  echo Update failed. Log: %APPDATA%\\RiftboundOBS\\updates\\update.log
+  pause
+  exit /b 1
+)
+`,
+      "utf8"
+    );
+
+    writeFileSync(
+      join(outDir, "Install Stream Deck plugin.bat"),
+      `@echo off
+title Install Riftbound Stream Deck plugin
+set DEST=%APPDATA%\\Elgato\\StreamDeck\\Plugins\\com.riftbound.obs.sdPlugin
+echo Installing to %DEST%
+if exist "%DEST%" rmdir /S /Q "%DEST%"
+xcopy /E /I /Y "%~dp0resources\\riftbound\\streamdeck-plugin\\com.riftbound.obs.sdPlugin" "%DEST%\\"
+if not exist "%DEST%\\manifest.json" (
+  echo.
+  echo ERROR: Plugin install failed.
+  pause
+  exit /b 1
+)
+echo.
+echo OK! Now QUIT Stream Deck completely ^(tray icon - Quit^), then reopen it.
+pause
+`,
+      "utf8"
+    );
+
+    writeFileSync(
+      join(outDir, "Import Stream Deck profile.bat"),
+      `@echo off
+title Import Riftbound Stream Deck profile
+if not "%~1"=="" (set "PROFILE=%~1") else (set "PROFILE=%~dp0Riftbound-OBS.streamDeckProfile")
+if not exist "%PROFILE%" (
+  echo Put Riftbound-OBS.streamDeckProfile in this folder, or drag it onto this script.
+  pause
+  exit /b 1
+)
+echo Quit Stream Deck first ^(tray - Quit^). Press any key...
+pause >nul
+if exist "%APPDATA%\\Elgato\\StreamDeck\\ProfilesV3\\" (set "DEST=%APPDATA%\\Elgato\\StreamDeck\\ProfilesV3") else (set "DEST=%APPDATA%\\Elgato\\StreamDeck\\ProfilesV2")
+set "TMP=%TEMP%\\riftbound-sd-import"
+if exist "%TMP%" rmdir /S /Q "%TMP%"
+mkdir "%TMP%"
+copy /Y "%PROFILE%" "%TMP%\\profile.zip" >nul
+powershell -NoProfile -Command "Expand-Archive -LiteralPath '%TMP%\\profile.zip' -DestinationPath '%TMP%\\extract' -Force"
+xcopy /E /I /Y "%TMP%\\extract\\*" "%DEST%\\"
+rmdir /S /Q "%TMP%"
+echo Done. Restart Stream Deck, select device on the left, profile "Riftbound OBS" at top.
+pause
+`,
+      "utf8"
+    );
+    return;
+  }
+
   const envFlag =
     installMode === "installer" ? "set RIFTBOUND_INSTALLER=1" : "set RIFTBOUND_PORTABLE=1";
   writeFileSync(

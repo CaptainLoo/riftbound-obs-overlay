@@ -38,24 +38,28 @@ The server starts on port `7474` (configurable via the `PORT` environment variab
 
 Keep this window/terminal open while you stream.
 
-## Windows executable (no Node.js required)
+## Windows desktop app (no Node.js required)
 
-Build a portable Windows package (works from macOS or Windows):
+Build the Windows Electron app (works from macOS for patch builds; full `.exe` is built on GitHub Actions):
 
 ```bash
-npm run build:win
+npm run build:electron   # or npm run build:win
+npm run dev:electron     # local dev with native control window (Mac or Windows)
 ```
 
 Output:
 
-- `dist/riftbound-obs-windows.zip` (~32 MB) — share this with Windows users
-- `dist/win/` — unzipped release folder
+- `dist/electron/win-unpacked/Riftbound OBS.exe` — portable folder
+- `dist/electron/riftbound-setup-X.Y.Z.exe` — NSIS installer (Windows build)
+- `dist/riftbound-obs-windows.zip` — zip of portable folder (alias `dist/win/`)
 
 **On Windows:**
 
-1. Extract the zip anywhere.
-2. Double-click **`Start Riftbound.bat`**.
-3. The control panel opens in the browser; add `http://localhost:7474/overlay` in OBS.
+1. Install via **`riftbound-setup-X.Y.Z.exe`** or extract the portable zip.
+2. Double-click **`Riftbound OBS`** — the control panel opens in a dedicated window (no terminal).
+3. In OBS, add Browser Source: `http://localhost:7474/overlay`
+
+Optional debug launchers in the install folder: `Start Riftbound.bat`, `Update Riftbound.bat`.
 
 Data (decks, layout, cached images) is stored in `%APPDATA%\RiftboundOBS\`.
 
@@ -66,15 +70,15 @@ Develop on macOS, stream on Windows with **in-app updates** (light ~1 MB patch b
 ### Recommended: Windows installer
 
 1. Download **`riftbound-setup-X.Y.Z.exe`** from [GitHub Releases](https://github.com/CaptainLoo/riftbound-obs-overlay/releases).
-2. Run the installer (per-user, no admin required). Installs to `%LOCALAPPDATA%\Riftbound OBS\`.
-3. Launch **Riftbound OBS** from the Start menu.
-4. Updates use a **hybrid channel**: small patches for app code, silent full installer when Node runtime changes or `forceFull` is set in the manifest.
+2. Run the installer (per-user, no admin required).
+3. Launch **Riftbound OBS** from the desktop shortcut or Start menu.
+4. Updates use a **hybrid channel**: small patches for app code, silent full installer when the Electron runtime changes or `forceFull` is set in the manifest.
 
-### Legacy: portable zip
+### Legacy: portable zip (pre-Electron)
 
 1. Extract **`riftbound-obs-windows.zip`** anywhere.
-2. Double-click **`Start Riftbound.bat`**.
-3. Patches still work; the control panel may suggest migrating to the installer.
+2. Run **`Riftbound OBS.exe`** (or `Start Riftbound.bat` on very old builds).
+3. Migrate to the installer for the best update experience.
 
 Data (decks, layout, cached images) is always stored in `%APPDATA%\RiftboundOBS\` — never overwritten by updates.
 
@@ -99,12 +103,14 @@ npm run publish        # bump patch version, build, push GitHub Release
 `npm run publish` uploads immediately:
 
 - `riftbound-obs-patch-X.Y.Z.zip`
-- `riftbound-obs-windows.zip`
 - `update-manifest.json`
+
+On Windows, it also uploads `riftbound-obs-windows.zip`. On macOS, CI builds the portable zip and installer after the tag push.
 
 Then pushes git tag `vX.Y.Z` → CI attaches within a few minutes:
 
-- `riftbound-setup-X.Y.Z.exe` (Windows installer, built on GitHub Actions)
+- `riftbound-setup-X.Y.Z.exe` (Windows NSIS installer)
+- `riftbound-obs-windows.zip` (portable Electron build)
 - updated `update-manifest.json` (with installer SHA256)
 
 Options: `npm run publish -- minor`, `npm run publish -- --no-bump`, `npm run publish -- --notes="Fix overlay"`.
@@ -113,11 +119,12 @@ Build commands:
 
 ```bash
 npm run build:patch       # patch zip only
-npm run build:win         # portable folder + zip
-npm run build:installer   # setup.exe (requires Inno Setup 6+)
+npm run build:electron    # Electron portable + NSIS (Windows)
+npm run build:win         # alias for build:electron
+npm run dev:electron      # dev shell with native control window
 ```
 
-GitHub Actions workflow **Release Installer** (`.github/workflows/release-installer.yml`) builds `riftbound-setup-X.Y.Z.exe` on Windows automatically when `npm run publish` pushes the release tag. No Inno Setup needed on Mac.
+GitHub Actions workflow **Release Installer** (`.github/workflows/release-installer.yml`) builds `riftbound-setup-X.Y.Z.exe` and the portable zip on Windows automatically when `npm run publish` pushes the release tag.
 
 ### On Windows (after first install)
 
@@ -127,7 +134,7 @@ GitHub Actions workflow **Release Installer** (`.github/workflows/release-instal
 4. The panel waits until the new version is detected, then reloads.
 5. Stream Deck plugin is updated automatically on patch updates; restart Stream Deck if keys behave oddly.
 
-If update fails, check `%APPDATA%\RiftboundOBS\updates\update.log` and restart with **Start Riftbound.bat**.
+If update fails, check `%APPDATA%\RiftboundOBS\updates\update.log` and relaunch **Riftbound OBS**.
 
 ### Windows QA checklist (before calling updates stable)
 
@@ -143,8 +150,8 @@ If update fails, check `%APPDATA%\RiftboundOBS\updates\update.log` and restart w
 
 ```bash
 npm run build:patch    # dist/riftbound-obs-patch-VERSION.zip only
-npm run build:win      # full portable zip
-npm run build:installer
+npm run build:electron # full Electron build (Windows)
+npm run dev:electron   # native control window in dev
 ```
 
 ## OBS integration
@@ -223,7 +230,7 @@ The overlay has a transparent background: only the configured elements are shown
 
 ### Ready-to-use setup (recommended)
 
-1. Start Riftbound (`npm start` or `Start Riftbound.bat`).
+1. Start Riftbound (`npm start`, `npm run dev:electron`, or launch **Riftbound OBS** on Windows).
 2. **Install the plugin once:** `npm run install:streamdeck` — then restart the Stream Deck app.
 3. Control panel → **Stream Deck** tab → choose your device → **Download profile**.
 4. Double-click `Riftbound-OBS.streamDeckProfile` to import.

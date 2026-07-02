@@ -8,9 +8,9 @@ import { join } from "node:path";
 import {
   ROOT,
   bumpVersion,
+  getManifestNodeVersion,
   getUpdateRepo,
   getVersion,
-  NODE_VERSION,
   sha256File,
 } from "./release-shared.mjs";
 
@@ -43,13 +43,17 @@ execSync("npm run build:patch", {
 });
 
 console.log("\nBuilding full Windows release…");
-execSync("npm run build:win", {
-  cwd: ROOT,
-  stdio: "inherit",
-  env: { ...process.env, SKIP_STREAMDECK_BUILD: "1" },
-});
+if (process.platform === "win32") {
+  execSync("npm run build:win", {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: { ...process.env, SKIP_STREAMDECK_BUILD: "1" },
+  });
+} else {
+  console.log("Skipping full Windows Electron build on non-Windows host — CI builds after tag push.\n");
+}
 
-// Installer (.exe) is built on GitHub Actions (Windows) when the release tag is pushed.
+// Installer (.exe) and portable zip are built on GitHub Actions (Windows) when the release tag is pushed.
 
 const patchZip = join(ROOT, "dist", `riftbound-obs-patch-${version}.zip`);
 const fullZip = join(ROOT, "dist", "riftbound-obs-windows.zip");
@@ -63,7 +67,7 @@ const updateManifest = {
   channel: "stable",
   releasedAt: new Date().toISOString(),
   notes,
-  nodeVersion: NODE_VERSION,
+  nodeVersion: getManifestNodeVersion(),
   forceFull: false,
   minPatchFrom: "0.1.0",
   patch: {
@@ -81,7 +85,10 @@ writeFileSync(manifestPath, `${JSON.stringify(updateManifest, null, 2)}\n`, "utf
 const tag = `v${version}`;
 console.log(`\nCreating GitHub release ${tag} on ${repo}…`);
 
-const assets = [`"${patchZip}"`, `"${fullZip}"`, `"${manifestPath}"`];
+const assets = [`"${patchZip}"`, `"${manifestPath}"`];
+if (existsSync(fullZip)) {
+  assets.splice(1, 0, `"${fullZip}"`);
+}
 
 try {
   execSync(`gh release view ${tag} --repo ${repo}`, { stdio: "ignore" });
@@ -114,5 +121,5 @@ try {
 }
 
 console.log(`\nPublished: https://github.com/${repo}/releases/tag/${tag}`);
-console.log("Assets now: patch zip, portable zip, update-manifest.json");
-console.log(`CI workflow "Release Installer" attaches riftbound-setup-${version}.exe within a few minutes.\n`);
+console.log("Assets now: patch zip, update-manifest.json" + (existsSync(fullZip) ? ", portable zip" : ""));
+console.log(`CI workflow "Release Installer" attaches riftbound-setup-${version}.exe and portable zip within a few minutes.\n`);

@@ -14,6 +14,7 @@ import {
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { spawnAppLauncher, resolvePatchTargetRoot } from "./launcher.js";
 import {
   acquireLock,
   log,
@@ -58,22 +59,23 @@ function installStreamDeckPlugin(installRootDir) {
   log(`Stream Deck plugin installed → ${dest}`);
 }
 
-function runNpmCi(installRootDir) {
-  const nodeExe = join(installRootDir, "node", "node.exe");
+function runNpmCi(nodeRoot, workDir) {
+  const nodeExe = join(nodeRoot, "node", "node.exe");
   if (!existsSync(nodeExe)) {
     log("Bundled node not found — skipping npm ci.");
     return;
   }
-  const npmCli = join(installRootDir, "node_modules", "npm", "bin", "npm-cli.js");
+  const npmCli = join(workDir, "node_modules", "npm", "bin", "npm-cli.js");
   if (existsSync(npmCli)) {
-    execSync(`"${nodeExe}" "${npmCli}" ci --omit=dev`, { cwd: installRootDir, stdio: "inherit" });
+    execSync(`"${nodeExe}" "${npmCli}" ci --omit=dev`, { cwd: workDir, stdio: "inherit" });
     return;
   }
   execSync(`"${nodeExe}" -e "require('child_process').execSync('npm ci --omit=dev',{stdio:'inherit'})"`, {
-    cwd: installRootDir,
+    cwd: workDir,
     stdio: "inherit",
     shell: true,
   });
+}
 }
 
 async function renameWithRetry(from, to, attempts = 8) {
@@ -157,17 +159,17 @@ function prepareStaging(extractDir, installRoot) {
   return stagingRoot;
 }
 
-async function applyStaging(stagingRoot, installRoot) {
+async function applyStaging(stagingRoot, installRoot, contentRoot) {
   const backupRoot = join(installRoot, ".update-backup");
   rmSync(backupRoot, { recursive: true, force: true });
   mkdirSync(backupRoot, { recursive: true });
 
   try {
     for (const name of ["server", "public", "streamdeck-plugin"]) {
-      await swapPath(join(stagingRoot, name), join(installRoot, name), backupRoot);
+      await swapPath(join(stagingRoot, name), join(contentRoot, name), backupRoot);
     }
     for (const name of ["package.json", "package-lock.json"]) {
-      await swapFile(join(stagingRoot, name), join(installRoot, name), backupRoot);
+      await swapFile(join(stagingRoot, name), join(contentRoot, name), backupRoot);
     }
     for (const bat of [
       "Start Riftbound.bat",
@@ -184,17 +186,11 @@ async function applyStaging(stagingRoot, installRoot) {
 }
 
 function restartApp(installRoot) {
-  const startBat = join(installRoot, "Start Riftbound.bat");
-  if (!existsSync(startBat)) {
-    log(`Start Riftbound.bat not found in ${installRoot}`);
+  if (spawnAppLauncher(installRoot, { spawnFn: spawn, cwd: installRoot })) {
+    log(`Restarting app from ${installRoot}`);
     return;
   }
-  log(`Restarting app → ${startBat}`);
-  spawn("cmd.exe", ["/c", "start", "Riftbound OBS", "/D", installRoot, startBat], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: false,
-  }).unref();
+  log(`App launcher not found in ${installRoot}`);
 }
 
 async function main() {
@@ -219,7 +215,9 @@ export async function runPatchApply() {
     }
 
     const installRoot = normalizePath(pending.installRoot || process.cwd());
+    const contentRoot = resolvePatchTargetRoot(installRoot);
     log(`Install root: ${installRoot}`);
+    log(`Content root: ${contentRoot}`);
     if (!existsSync(installRoot)) {
       log(`Install folder not found: ${installRoot}`);
       process.exit(1);
@@ -244,23 +242,28 @@ export async function runPatchApply() {
     log("Extracting patch…");
     expandZip(zipPath, extractDir);
 
-    const oldLock = existsSync(join(installRoot, "package-lock.json"))
-      ? readFileSync(join(installRoot, "package-lock.json"), "utf8")
+    const oldLock = existsSync(join(contentRoot, "package-lock.json"))
+      ? readFileSync(join(contentRoot, "package-lock.json"), "utf8")
       : null;
     const newLockPath = join(extractDir, "package-lock.json");
     const newLock = existsSync(newLockPath) ? readFileSync(newLockPath, "utf8") : null;
     const depsChanged = Boolean(newLock && newLock !== oldLock);
 
     const stagingRoot = prepareStaging(extractDir, installRoot);
-    log(`Applying staged update to ${installRoot}`);
-    await applyStaging(stagingRoot, installRoot);
+    log(`Applying staged update to ${contentRoot}`);
+    await applyStaging(stagingRoot, installRoot, contentRoot);
 
     if (depsChanged) {
-      log("Dependencies changed — running npm ci…");
-      runNpmCi(installRoot);
+      const nodeExe = join(installRoot, "node", "node.exe");
+      if (existsSync(nodeExe)) {
+        log("Dependencies changed — running npm ci…");
+        runNpmCi(installRoot, contentRoot);
+      } else {
+        log("Dependencies changed — skip npm ci (Electron install, use full installer if needed).");
+      }
     }
 
-    installStreamDeckPlugin(installRoot);
+    installStreamDeckPlugin(contentRoot);
 
     rmSync(pendingPath(), { force: true });
     rmSync(extractDir, { recursive: true, force: true });

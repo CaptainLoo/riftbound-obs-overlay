@@ -1,9 +1,9 @@
 {
   "name": "riftbound-obs-overlay",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Riftbound stream overlay for OBS (Browser Source) with web control panel.",
   "type": "module",
-  "main": "server/index.js",
+  "main": "electron/main.cjs",
   "repository": {
     "type": "git",
     "url": "https://github.com/CaptainLoo/riftbound-obs-overlay.git"
@@ -14,6 +14,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
+    "dev:electron": "electron .",
+    "build:electron": "node scripts/build-electron.mjs",
     "build:win": "node scripts/build-win.mjs",
     "build:patch": "node scripts/build-patch.mjs",
     "build:installer": "node scripts/build-installer.mjs",
@@ -30,5 +32,52 @@
     "express": "^4.19.2",
     "lowdb": "^7.0.1",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+    "productName": "Riftbound OBS",
+    "directories": {
+      "output": "dist/electron"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "dist/electron-staging/riftbound",
+        "to": "riftbound"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "electron/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "riftbound-setup-${version}.${ext}",
+      "installerIcon": "electron/icon.png",
+      "uninstallerIcon": "electron/icon.png"
+    }
   }
 }

@@ -6446,7 +6446,7 @@ function request(method, path2, settings3, body) {
     req.on("error", (err) => {
       reject(
         new Error(
-          `Riftbound app unreachable at ${base}. Start "Start Riftbound.bat" and keep the window open. (${err.message})`
+          `Riftbound app unreachable at ${base}. Launch Riftbound OBS and keep it running. (${err.message})`
         )
       );
     });

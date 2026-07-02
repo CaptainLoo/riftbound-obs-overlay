@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { IS_INSTALLER, IS_PORTABLE, ROOT_DIR } from "./paths.js";
+import { IS_ELECTRON, IS_INSTALLER, IS_PORTABLE, getInstallRoot } from "./paths.js";
 import {
   acquireLock,
   clearDownloadProgress,
@@ -33,10 +33,11 @@ const GITHUB_HEADERS = {
 };
 
 export function isUpdateSupported() {
-  return platform() === "win32" && (IS_PORTABLE || IS_INSTALLER);
+  return platform() === "win32" && (IS_PORTABLE || IS_INSTALLER || IS_ELECTRON);
 }
 
 export function getInstallType() {
+  if (IS_ELECTRON) return "electron";
   if (IS_INSTALLER) return "installer";
   if (IS_PORTABLE) return "portable";
   return "dev";
@@ -364,7 +365,7 @@ export async function downloadUpdate() {
         installerExe: dest,
         sha256,
         restart: true,
-        installRoot: ROOT_DIR.replace(/[\\/]+$/, ""),
+        installRoot: getInstallRoot().replace(/[\\/]+$/, ""),
         applyToken: token,
       };
     } else {
@@ -383,7 +384,7 @@ export async function downloadUpdate() {
         patchZip: dest,
         sha256,
         restart: true,
-        installRoot: ROOT_DIR.replace(/[\\/]+$/, ""),
+        installRoot: getInstallRoot().replace(/[\\/]+$/, ""),
         applyToken: token,
       };
     }
@@ -434,11 +435,11 @@ export function applyUpdate(applyTokenFromClient) {
     }
 
     pending.restart = true;
-    pending.installRoot = ROOT_DIR.replace(/[\\/]+$/, "");
+    pending.installRoot = getInstallRoot().replace(/[\\/]+$/, "");
     pending.applyToken = applyTokenFromClient || getApplyToken();
     writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
 
-    const updateBat = join(ROOT_DIR, "Update Riftbound.bat");
+    const updateBat = join(getInstallRoot(), "Update Riftbound.bat");
     if (!existsSync(updateBat)) {
       throw new Error("Update Riftbound.bat not found in install folder.");
     }
@@ -446,7 +447,7 @@ export function applyUpdate(applyTokenFromClient) {
     spawn("cmd.exe", ["/c", "start", "Riftbound Update", updateBat], {
       detached: true,
       stdio: "ignore",
-      cwd: ROOT_DIR,
+      cwd: getInstallRoot(),
       windowsHide: false,
     }).unref();
 

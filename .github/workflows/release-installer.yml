@@ -1,6 +1,6 @@
 name: Release Installer
 
-# Builds riftbound-setup-VERSION.exe on Windows after `npm run publish` pushes tag v*.
+# Builds Electron portable zip + riftbound-setup-VERSION.exe on Windows after `npm run publish` pushes tag v*.
 on:
   push:
     tags:
@@ -36,28 +36,13 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Add ISCC to PATH
-        run: echo "C:/Program Files (x86)/Inno Setup 6" >> "$GITHUB_PATH"
-        shell: bash
-
-      - name: Download portable zip from release
-        shell: bash
+      - name: Build Electron Windows release
+        run: npm run build:electron
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.meta.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "riftbound-obs-windows.zip" --dir dist
-          unzip -q dist/riftbound-obs-windows.zip -d dist
-          test -d dist/win
-
-      - name: Build installer
-        shell: bash
-        run: npm run build:installer
+          SKIP_STREAMDECK_BUILD: "1"
 
       - name: Patch update manifest with installer metadata
         shell: bash
@@ -67,7 +52,7 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
         run: node scripts/update-manifest-installer.mjs
 
-      - name: Upload installer and manifest to release
+      - name: Upload installer, portable zip, and manifest to release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,6 +62,7 @@ jobs:
           set -euo pipefail
           gh release upload "$TAG" \
             "dist/riftbound-setup-${VERSION}.exe" \
+            "dist/riftbound-obs-windows.zip" \
             "dist/update-manifest.json" \
             --repo "${{ github.repository }}" \
             --clobber

@@ -12,8 +12,10 @@ export const IS_PKG = Boolean(process.pkg);
 export const IS_PORTABLE = process.env.RIFTBOUND_PORTABLE === "1";
 /** True when launched via the Inno Setup installer shortcut. */
 export const IS_INSTALLER = process.env.RIFTBOUND_INSTALLER === "1";
+/** True when launched via the Electron desktop shell. */
+export const IS_ELECTRON = process.env.RIFTBOUND_ELECTRON === "1";
 /** Packaged exe or portable folder (not dev `npm start`). */
-export const IS_RELEASE = IS_PKG || IS_PORTABLE || IS_INSTALLER;
+export const IS_RELEASE = IS_PKG || IS_PORTABLE || IS_INSTALLER || IS_ELECTRON;
 
 const DEV_ROOT = join(__dirname, "..");
 
@@ -28,21 +30,45 @@ function userDataDir() {
   return join(homedir(), ".config", "riftbound-obs");
 }
 
-function releaseRoot() {
+/** Install folder (exe dir on Electron, cwd for portable). */
+export function getInstallRoot() {
+  if (IS_ELECTRON && process.env.RIFTBOUND_INSTALL_ROOT) {
+    return process.env.RIFTBOUND_INSTALL_ROOT.replace(/[\\/]+$/, "");
+  }
+  if (IS_ELECTRON && process.env.RIFTBOUND_DEV === "1") {
+    return DEV_ROOT;
+  }
+  if (IS_ELECTRON) {
+    return dirname(process.execPath);
+  }
   if (IS_PKG) return dirname(process.execPath);
-  return process.cwd();
+  if (IS_RELEASE) return process.cwd();
+  return DEV_ROOT;
+}
+
+/** Patchable app content (server, public, package.json). */
+export function getContentRoot() {
+  if (IS_ELECTRON && process.env.RIFTBOUND_DEV === "1") {
+    return DEV_ROOT;
+  }
+  if (IS_ELECTRON) {
+    const bundled = join(process.resourcesPath, "riftbound");
+    if (existsSync(join(bundled, "server"))) return bundled;
+  }
+  if (IS_PKG) {
+    const external = join(dirname(process.execPath), "server");
+    if (existsSync(external)) return dirname(process.execPath);
+    return join(__dirname, "..");
+  }
+  if (IS_RELEASE) return process.cwd();
+  return DEV_ROOT;
 }
 
 function resolvePublicDir(root) {
-  if (IS_PKG) {
-    const external = join(dirname(process.execPath), "public");
-    if (existsSync(external)) return external;
-    return join(__dirname, "..", "public");
-  }
   return join(root, "public");
 }
 
-export const ROOT_DIR = IS_RELEASE ? releaseRoot() : DEV_ROOT;
+export const ROOT_DIR = getContentRoot();
 export const PUBLIC_DIR = resolvePublicDir(ROOT_DIR);
 export const DATA_DIR = IS_RELEASE ? userDataDir() : join(DEV_ROOT, "data");
 export const CARDS_DIR = join(DATA_DIR, "cards");
