@@ -7,11 +7,15 @@ const ELECTRON_UPDATE_BAT = `@echo off
 title Riftbound OBS — Update
 cd /d "%~dp0"
 echo Waiting for server to stop...
-timeout /t 3 /nobreak >nul
+timeout /t 8 /nobreak >nul
 set ELECTRON_RUN_AS_NODE=1
 set RIFTBOUND_ELECTRON=1
 set RIFTBOUND_INSTALL_ROOT=%~dp0
-"%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
+if exist "%~dp0resources\\updater\\bootstrap.js" (
+  "%~dp0Riftbound OBS.exe" "%~dp0resources\\updater\\bootstrap.js"
+) else (
+  "%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
+)
 if errorlevel 1 (
   echo.
   echo Update failed. Log: %APPDATA%\\RiftboundOBS\\updates\\update.log

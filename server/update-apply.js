@@ -64,7 +64,7 @@ function runNpmCi(nodeRoot, workDir) {
   });
 }
 
-async function renameWithRetry(from, to, attempts = 8) {
+async function renameWithRetry(from, to, attempts = 12) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -74,7 +74,7 @@ async function renameWithRetry(from, to, attempts = 8) {
     } catch (err) {
       lastErr = err;
       log(`Rename retry ${i + 1}/${attempts} ${from} → ${to}: ${err.message}`);
-      if (i < attempts - 1) await sleep(1000);
+      if (i < attempts - 1) await sleep(2000);
     }
   }
   throw lastErr;
@@ -248,6 +248,10 @@ export async function runPatchApply() {
 
     log(`Update applied successfully (v${pending.version}).`);
     if (pending.restart) restartApp(installRoot);
+  } catch (err) {
+    log(`Update failed: ${err.stack || err.message}`);
+    process.exitCode = 1;
+    throw err;
   } finally {
     releaseLock();
   }

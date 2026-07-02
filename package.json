@@ -49,16 +49,20 @@
       "package.json"
     ],
     "asar": true,
-    "extraResources": [
-      {
-        "from": "dist/electron-staging/riftbound",
-        "to": "riftbound"
-      }
-    ],
     "extraFiles": [
       {
         "from": "dist/electron-bats",
         "to": "."
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "dist/electron-staging/riftbound",
+        "to": "riftbound"
+      },
+      {
+        "from": "electron/updater",
+        "to": "updater"
       }
     ],
     "win": {

@@ -2,10 +2,12 @@
  * Route pending update to patch apply or installer apply.
  */
 import { pathToFileURL } from "node:url";
-import { existsSync, readFileSync } from "node:fs";
-import { pendingPath } from "./update-utils.js";
+import { reexecUpdateFromRunnerIfNeeded } from "./update-reexec.js";
 
 async function main() {
+  const { existsSync, readFileSync } = await import("node:fs");
+  const { pendingPath } = await import("./update-utils.js");
+
   if (!existsSync(pendingPath())) {
     console.error("No pending update.");
     process.exit(1);
@@ -25,8 +27,16 @@ const isCli =
   import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isCli) {
-  main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  reexecUpdateFromRunnerIfNeeded()
+    .then((reexecuted) => {
+      if (reexecuted) {
+        process.exit(0);
+        return;
+      }
+      return main();
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }
