@@ -75,9 +75,7 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "riftbound-setup-${version}.${ext}",
-      "installerIcon": "electron/icon.png",
-      "uninstallerIcon": "electron/icon.png"
+      "artifactName": "riftbound-setup-${version}.${ext}"
     }
   }
 }
