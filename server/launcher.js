@@ -1,7 +1,24 @@
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const APP_EXE_NAME = "Riftbound OBS.exe";
+
+const ELECTRON_UPDATE_BAT = `@echo off
+title Riftbound OBS — Update
+cd /d "%~dp0"
+echo Waiting for server to stop...
+timeout /t 3 /nobreak >nul
+set ELECTRON_RUN_AS_NODE=1
+set RIFTBOUND_ELECTRON=1
+set RIFTBOUND_INSTALL_ROOT=%~dp0
+"%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
+if errorlevel 1 (
+  echo.
+  echo Update failed. Log: %APPDATA%\\RiftboundOBS\\updates\\update.log
+  pause
+  exit /b 1
+)
+`;
 
 /** Where patch files (server/, public/) should be applied. */
 export function resolvePatchTargetRoot(installRoot) {
@@ -38,4 +55,32 @@ export function spawnAppLauncher(installRoot, { spawnFn, cwd }) {
     windowsHide: false,
   }).unref();
   return true;
+}
+
+/** Ensure Update Riftbound.bat exists next to the Electron exe (NSIS installs omit it). */
+export function ensureElectronUpdateBat(installRoot) {
+  const normalized = installRoot.replace(/[\\/]+$/, "");
+  const batPath = join(normalized, "Update Riftbound.bat");
+  if (existsSync(batPath)) return batPath;
+  const exe = join(normalized, APP_EXE_NAME);
+  if (!existsSync(exe)) return null;
+  writeFileSync(batPath, ELECTRON_UPDATE_BAT, "utf8");
+  return batPath;
+}
+
+export function spawnPatchUpdate(installRoot, { spawnFn, isElectron = false }) {
+  const normalized = installRoot.replace(/[\\/]+$/, "");
+  const updateBat = isElectron
+    ? ensureElectronUpdateBat(normalized)
+    : join(normalized, "Update Riftbound.bat");
+  if (!updateBat || !existsSync(updateBat)) {
+    return { ok: false, error: "Update Riftbound.bat not found in install folder." };
+  }
+  spawnFn("cmd.exe", ["/c", "start", "Riftbound Update", updateBat], {
+    detached: true,
+    stdio: "ignore",
+    cwd: normalized,
+    windowsHide: false,
+  }).unref();
+  return { ok: true };
 }

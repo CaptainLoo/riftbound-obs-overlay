@@ -12,6 +12,11 @@ const version = getVersion();
 
 console.log(`Building Electron Windows release v${version}…\n`);
 
+const batsDir = join(ROOT, "dist", "electron-bats");
+rmSync(batsDir, { recursive: true, force: true });
+mkdirSync(batsDir, { recursive: true });
+writeWindowsBats(batsDir, { installMode: "electron" });
+
 prepareElectronResources();
 
 const winUnpacked = join(ROOT, "dist", "electron", "win-unpacked");

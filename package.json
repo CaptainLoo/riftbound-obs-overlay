@@ -55,6 +55,12 @@
         "to": "riftbound"
       }
     ],
+    "extraFiles": [
+      {
+        "from": "dist/electron-bats",
+        "to": "."
+      }
+    ],
     "win": {
       "target": [
         {

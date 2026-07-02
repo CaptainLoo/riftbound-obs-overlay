@@ -11,6 +11,7 @@ import {
 import { platform } from "node:os";
 import { join } from "node:path";
 import { IS_ELECTRON, IS_INSTALLER, IS_PORTABLE, getInstallRoot } from "./paths.js";
+import { spawnPatchUpdate } from "./launcher.js";
 import {
   acquireLock,
   clearDownloadProgress,
@@ -462,22 +463,16 @@ export function applyUpdate(applyTokenFromClient) {
       );
     }
 
+    const installRoot = getInstallRoot().replace(/[\\/]+$/, "");
     pending.restart = true;
-    pending.installRoot = getInstallRoot().replace(/[\\/]+$/, "");
+    pending.installRoot = installRoot;
     pending.applyToken = applyTokenFromClient || getApplyToken();
     writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
 
-    const updateBat = join(getInstallRoot(), "Update Riftbound.bat");
-    if (!existsSync(updateBat)) {
-      throw new Error("Update Riftbound.bat not found in install folder.");
+    const spawned = spawnPatchUpdate(installRoot, { spawnFn: spawn, isElectron: IS_ELECTRON });
+    if (!spawned.ok) {
+      throw new Error(spawned.error);
     }
-
-    spawn("cmd.exe", ["/c", "start", "Riftbound Update", updateBat], {
-      detached: true,
-      stdio: "ignore",
-      cwd: getInstallRoot(),
-      windowsHide: false,
-    }).unref();
 
     releaseLock();
     setTimeout(() => process.exit(0), 500);
