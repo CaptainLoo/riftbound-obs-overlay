@@ -647,6 +647,15 @@ async function renderStreamDeck() {
         if (name) parts.push(name);
       }
       if (info.firmwareVersion) parts.push(`FW ${info.firmwareVersion}`);
+      if (
+        info.drawProgress &&
+        info.drawProgress.total > 0 &&
+        info.drawProgress.done < info.drawProgress.total
+      ) {
+        parts.push(
+          `Loading key images (${info.drawProgress.done}/${info.drawProgress.total})…`
+        );
+      }
       detail.textContent = parts.join(" · ");
       if (hint) hint.textContent = info.hint || "";
     } else if (info.phase === "error" || (info.error && info.phase !== "loading" && info.phase !== "scanning" && info.phase !== "opening" && info.phase !== "drawing")) {
@@ -729,7 +738,21 @@ if (sdReconnect) {
       const res = await fetch("/api/streamdeck/reconnect", { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || res.statusText || "Reconnect failed");
-      toast(body.connected ? "Stream Deck connected" : body.error || "Stream Deck not detected", body.connected ? "ok" : "err");
+      let toastMsg = "Stream Deck connected";
+      let toastKind = "ok";
+      if (!body.connected) {
+        if (body.error) {
+          toastMsg = body.error;
+          toastKind = "err";
+        } else if (body.phase === "drawing") {
+          toastMsg = "Still connecting…";
+          toastKind = "warn";
+        } else {
+          toastMsg = "Stream Deck not detected";
+          toastKind = "err";
+        }
+      }
+      toast(toastMsg, toastKind);
       await renderStreamDeck();
     } catch (err) {
       toast("Reconnect failed: " + err.message, "err");

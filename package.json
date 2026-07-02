@@ -1,6 +1,6 @@
 {
   "name": "riftbound-obs-overlay",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Riftbound stream overlay for OBS (Browser Source) with web control panel.",
   "type": "module",
   "main": "electron/main.cjs",
@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@elgato-stream-deck/node": "^7.6.3",
+    "@electron/rebuild": "^4.1.0",
     "archiver": "^6.0.2",
     "express": "^4.19.2",
     "lowdb": "^7.0.1",
@@ -34,7 +35,6 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.1.0",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8"
   },

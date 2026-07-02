@@ -46,7 +46,10 @@ let status = {
   error: null,
   devicesFound: [],
   lastScanAt: null,
+  drawProgress: null,
 };
+
+let imageDrawInFlight = false;
 
 function setStatus(patch) {
   status = { ...status, ...patch };
@@ -179,7 +182,35 @@ async function handleKeyAction(keyDef, keyIndex) {
   }
 }
 
-async function drawCurrentPage() {
+async function drawCurrentPageColorsOnly() {
+  if (!deck || !pages.length) return;
+  const page = pages[currentPageIndex];
+  if (!page) return;
+
+  const { getIconColorForKeyDef } = await loadImagesMod();
+  const controls = deck.CONTROLS.filter((c) => c.type === "button");
+  const validIndices = new Set(controls.map((c) => c.index));
+
+  for (const idx of validIndices) {
+    if (!page.keys.has(idx)) {
+      await deck.fillKeyColor(idx, 0, 0, 0);
+    }
+  }
+
+  for (const [idx, keyDef] of page.keys.entries()) {
+    if (!validIndices.has(idx)) continue;
+    const [r, g, b] = getIconColorForKeyDef(keyDef);
+    await deck.fillKeyColor(idx, r, g, b);
+  }
+}
+
+async function fillKeyWithColorFallback(keyIndex, keyDef) {
+  const { getIconColorForKeyDef } = await loadImagesMod();
+  const [r, g, b] = getIconColorForKeyDef(keyDef);
+  await deck.fillKeyColor(keyIndex, r, g, b);
+}
+
+async function drawCurrentPageImages() {
   if (!deck || !pages.length) return { drawn: 0, failed: 0 };
   const page = pages[currentPageIndex];
   if (!page) return { drawn: 0, failed: 0 };
@@ -187,18 +218,14 @@ async function drawCurrentPage() {
   const controls = deck.CONTROLS.filter((c) => c.type === "button");
   const validIndices = new Set(controls.map((c) => c.index));
   const expectedBytes = keySize * keySize * 3;
+  const entries = [...page.keys.entries()].filter(([idx]) => validIndices.has(idx));
+  const total = entries.length;
   let drawn = 0;
   let failed = 0;
-  let firstError = null;
 
-  for (const idx of validIndices) {
-    if (!page.keys.has(idx)) {
-      await deck.clearKey(idx);
-    }
-  }
+  setStatus({ drawProgress: { done: 0, total, failed: 0 } });
 
-  for (const [idx, keyDef] of page.keys.entries()) {
-    if (!validIndices.has(idx)) continue;
+  for (const [idx, keyDef] of entries) {
     try {
       const { renderKeyImage } = await loadImagesMod();
       const rgb = await renderKeyImage(keyDef, db.data.cardsCache, keySize);
@@ -209,20 +236,34 @@ async function drawCurrentPage() {
       drawn += 1;
     } catch (err) {
       failed += 1;
-      if (!firstError) firstError = err;
-      console.error(`[streamdeck] Key ${idx} draw failed:`, err.message);
+      console.error(`[streamdeck] Key ${idx} image failed, using color:`, err.message);
+      try {
+        await fillKeyWithColorFallback(idx, keyDef);
+      } catch (fallbackErr) {
+        console.error(`[streamdeck] Key ${idx} color fallback failed:`, fallbackErr.message);
+      }
     }
+    setStatus({ drawProgress: { done: drawn + failed, total, failed } });
   }
 
-  if (drawn === 0 && page.keys.size > 0) {
-    throw new Error(
-      firstError
-        ? `Key image render failed: ${formatError(firstError)}`
-        : "Key image render failed — reinstall Riftbound OBS."
-    );
-  }
-
+  setStatus({ drawProgress: null });
   return { drawn, failed };
+}
+
+function scheduleImageDraw() {
+  if (!deck || imageDrawInFlight) return;
+  imageDrawInFlight = true;
+  drawCurrentPageImages()
+    .catch((err) => console.error("[streamdeck] Background image draw failed:", err.message))
+    .finally(() => {
+      imageDrawInFlight = false;
+    });
+}
+
+async function drawCurrentPage() {
+  if (!deck || !pages.length) return { drawn: 0, failed: 0 };
+  await drawCurrentPageColorsOnly();
+  return drawCurrentPageImages();
 }
 
 async function rebuildPages(resetPage = false) {
@@ -380,16 +421,19 @@ export async function startStreamDeck() {
       currentPage: 0,
       phase: "drawing",
       connected: false,
+      drawProgress: null,
     });
 
-    await drawCurrentPage();
+    await drawCurrentPageColorsOnly();
 
     setStatus({
       connected: true,
       phase: "connected",
+      drawProgress: null,
     });
 
     console.log(`[streamdeck] Connected: ${deck.PRODUCT_NAME} (${pages.length} pages)`);
+    scheduleImageDraw();
   } catch (err) {
     console.error("[streamdeck] Failed to open device:", err);
     deck = null;

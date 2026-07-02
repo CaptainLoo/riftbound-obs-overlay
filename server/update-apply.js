@@ -77,9 +77,9 @@ function runElectronRebuild(contentRoot) {
     log("@electron/rebuild not found — skipping native rebuild (use full installer if Stream Deck fails).");
     return;
   }
-  log(`Rebuilding native modules (sharp, node-hid) for Electron ${electronVer}…`);
+  log(`Rebuilding native modules (sharp, node-hid, @julusian/jpeg-turbo) for Electron ${electronVer}…`);
   execSync(
-    `"${process.execPath}" "${rebuildCli}" --module-dir "${contentRoot}" --force --only sharp,node-hid --version ${electronVer}`,
+    `"${process.execPath}" "${rebuildCli}" --module-dir "${contentRoot}" --force --only sharp,node-hid,@julusian/jpeg-turbo --version ${electronVer}`,
     {
       cwd: contentRoot,
       stdio: "inherit",

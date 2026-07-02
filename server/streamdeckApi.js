@@ -25,7 +25,33 @@ function idleStatus(error = null) {
     pageCount: 0,
     pageNames: [],
     devicesFound: [],
+    drawProgress: null,
   };
+}
+
+function writeWorkerCrashStatus() {
+  try {
+    const fromFile = readStatusFile();
+    if (!fromFile || fromFile.phase !== "drawing" || fromFile.error) return;
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(
+      STATUS_FILE,
+      `${JSON.stringify(
+        {
+          ...fromFile,
+          phase: "error",
+          connected: false,
+          worker: false,
+          error: "Stream Deck worker crashed during key draw. Reinstall Riftbound OBS.",
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+  } catch (err) {
+    logStartup("[streamdeck] worker crash status write failed", err);
+  }
 }
 
 function readStatusFile() {
@@ -76,6 +102,9 @@ function spawnWorker() {
 
   child.on("exit", (code) => {
     logStartup(`[streamdeck] worker exited (code ${code ?? "?"})`);
+    if (code !== 0 && code != null) {
+      writeWorkerCrashStatus();
+    }
     worker = null;
     workerStarting = false;
   });
@@ -125,7 +154,21 @@ export async function waitForStreamDeckStatus(timeoutMs = 15000) {
     await new Promise((r) => setTimeout(r, 400));
   }
 
-  return last || idleStatus("Timed out waiting for Stream Deck worker.");
+  if (last?.phase === "drawing") {
+    return {
+      ...last,
+      phase: "error",
+      connected: false,
+      error: "Drawing timed out — try reinstalling Riftbound OBS.",
+    };
+  }
+
+  return (
+    last || {
+      ...idleStatus("Timed out waiting for Stream Deck worker."),
+      phase: "error",
+    }
+  );
 }
 
 export async function reconnectStreamDeckSafe() {

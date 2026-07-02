@@ -12,7 +12,7 @@ async function getSharp() {
   return sharpLib;
 }
 
-const ICON_COLORS = {
+export const ICON_COLORS = {
   hide: [226, 87, 76],
   matchup: [255, 193, 7],
   reset: [255, 120, 80],
@@ -21,6 +21,12 @@ const ICON_COLORS = {
   show: [63, 185, 100],
   nav: [90, 90, 100],
 };
+
+export function getIconColorForKeyDef(keyDef) {
+  const icon =
+    keyDef.type === "navPrev" || keyDef.type === "navNext" ? "nav" : keyDef.icon || "game";
+  return ICON_COLORS[icon] || ICON_COLORS.game;
+}
 
 const labelCache = new Map();
 const cardCache = new Map();
