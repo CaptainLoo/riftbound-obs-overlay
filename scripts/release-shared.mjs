@@ -62,10 +62,13 @@ if errorlevel 1 pause
     `@echo off
 title Riftbound OBS — Update
 cd /d "%~dp0"
+echo Waiting for server to stop...
+timeout /t 3 /nobreak >nul
 echo Applying update...
 node\\node.exe server\\update-apply.js
 if errorlevel 1 (
-  echo Update failed.
+  echo.
+  echo Update failed. Log: %APPDATA%\\RiftboundOBS\\updates\\update.log
   pause
   exit /b 1
 )

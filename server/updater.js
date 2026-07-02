@@ -271,12 +271,14 @@ export function applyUpdate() {
     throw new Error("Update Riftbound.bat not found in install folder.");
   }
 
-  spawn("cmd.exe", ["/c", updateBat], {
+  // Visible cmd window; bat waits a few seconds so this process can exit and release file locks.
+  spawn("cmd.exe", ["/c", "start", "Riftbound Update", updateBat], {
     detached: true,
     stdio: "ignore",
     cwd: ROOT_DIR,
+    windowsHide: false,
   }).unref();
 
-  setTimeout(() => process.exit(0), 300);
+  setTimeout(() => process.exit(0), 500);
   return { ok: true, message: "Applying update and restarting…" };
 }

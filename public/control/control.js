@@ -1100,6 +1100,28 @@ updateDownloadBtn?.addEventListener("click", async () => {
   }
 });
 
+async function pollAfterUpdate() {
+  const maxAttempts = 45;
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      const res = await fetch("/api/version", { cache: "no-store" });
+      if (!res.ok) continue;
+      const info = await res.json();
+      updateDetail.textContent = info.version
+        ? `Updated to v${info.version}. Reloading…`
+        : "Update complete. Reloading…";
+      setTimeout(() => location.reload(), 800);
+      return;
+    } catch {
+      updateDetail.textContent = `Restarting… (${i + 1}/${maxAttempts})`;
+    }
+  }
+  updateDetail.textContent =
+    "Server did not restart. Run Start Riftbound.bat manually, or check %APPDATA%\\RiftboundOBS\\updates\\update.log";
+  updateApplyBtn.disabled = false;
+}
+
 updateApplyBtn?.addEventListener("click", async () => {
   if (!confirm("Install the update and restart the app? The control panel will close briefly.")) return;
   updateApplyBtn.disabled = true;
@@ -1107,6 +1129,7 @@ updateApplyBtn?.addEventListener("click", async () => {
   try {
     await api("/api/update/apply", { method: "POST" });
     updateDetail.textContent = "Restarting…";
+    pollAfterUpdate();
   } catch (err) {
     toast(err.message, "err");
     updateApplyBtn.disabled = false;

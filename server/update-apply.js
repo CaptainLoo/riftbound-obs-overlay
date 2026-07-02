@@ -4,6 +4,7 @@
 import { spawn, execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  appendFileSync,
   cpSync,
   createReadStream,
   existsSync,
@@ -26,6 +27,25 @@ function updatesDir() {
     return join(appData, "RiftboundOBS", "updates");
   }
   return join(homedir(), ".config", "riftbound-obs", "updates");
+}
+
+function logPath() {
+  return join(updatesDir(), "update.log");
+}
+
+function log(message) {
+  const line = `[${new Date().toISOString()}] ${message}`;
+  console.log(line);
+  try {
+    mkdirSync(updatesDir(), { recursive: true });
+    appendFileSync(logPath(), `${line}\n`, "utf8");
+  } catch {
+    /* ignore logging failures */
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function sha256File(filePath) {
@@ -53,20 +73,20 @@ function expandZip(zipPath, destDir) {
 function installStreamDeckPlugin(installRootDir) {
   const src = join(installRootDir, "streamdeck-plugin", "com.riftbound.obs.sdPlugin");
   if (!existsSync(src)) {
-    console.log("No streamdeck-plugin in patch — skipping.");
+    log("No streamdeck-plugin in patch — skipping.");
     return;
   }
   const appData = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
   const dest = join(appData, "Elgato", "StreamDeck", "Plugins", "com.riftbound.obs.sdPlugin");
   rmSync(dest, { recursive: true, force: true });
   cpSync(src, dest, { recursive: true });
-  console.log("Stream Deck plugin installed →", dest);
+  log(`Stream Deck plugin installed → ${dest}`);
 }
 
 function runNpmCi(installRootDir) {
   const nodeExe = join(installRootDir, "node", "node.exe");
   if (!existsSync(nodeExe)) {
-    console.log("Bundled node not found — skipping npm ci.");
+    log("Bundled node not found — skipping npm ci.");
     return;
   }
   const npmCli = join(installRootDir, "node_modules", "npm", "bin", "npm-cli.js");
@@ -81,43 +101,88 @@ function runNpmCi(installRootDir) {
   });
 }
 
-function copyTree(src, dest) {
+async function copyTreeWithRetry(src, dest, attempts = 8) {
   if (!existsSync(src)) return;
-  rmSync(dest, { recursive: true, force: true });
-  cpSync(src, dest, { recursive: true });
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      rmSync(dest, { recursive: true, force: true });
+      cpSync(src, dest, { recursive: true });
+      return;
+    } catch (err) {
+      lastErr = err;
+      log(`Copy retry ${i + 1}/${attempts} for ${src}: ${err.message}`);
+      if (i < attempts - 1) await sleep(1000);
+    }
+  }
+  throw lastErr;
+}
+
+async function copyFileWithRetry(src, dest, attempts = 8) {
+  if (!existsSync(src)) return;
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      cpSync(src, dest);
+      return;
+    } catch (err) {
+      lastErr = err;
+      log(`File copy retry ${i + 1}/${attempts} for ${src}: ${err.message}`);
+      if (i < attempts - 1) await sleep(1000);
+    }
+  }
+  throw lastErr;
+}
+
+function restartApp(installRoot) {
+  const startBat = join(installRoot, "Start Riftbound.bat");
+  if (!existsSync(startBat)) {
+    log(`Start Riftbound.bat not found in ${installRoot}`);
+    return;
+  }
+  log(`Restarting app → ${startBat}`);
+  spawn("cmd.exe", ["/c", "start", "Riftbound OBS", "/D", installRoot, startBat], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false,
+  }).unref();
 }
 
 async function main() {
+  mkdirSync(updatesDir(), { recursive: true });
+  writeFileSync(logPath(), `[${new Date().toISOString()}] --- update start ---\n`, "utf8");
+
   const pendingPath = join(updatesDir(), "pending.json");
   if (!existsSync(pendingPath)) {
-    console.error("No pending update (missing pending.json).");
+    log("No pending update (missing pending.json).");
     process.exit(1);
   }
 
   const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
   const installRoot = normalizePath(pending.installRoot || process.cwd());
+  log(`Install root: ${installRoot}`);
   if (!existsSync(installRoot)) {
-    console.error("Install folder not found:", installRoot);
+    log(`Install folder not found: ${installRoot}`);
     process.exit(1);
   }
 
   const zipPath = pending.patchZip;
   if (!existsSync(zipPath)) {
-    console.error("Patch zip not found:", zipPath);
+    log(`Patch zip not found: ${zipPath}`);
     process.exit(1);
   }
 
   if (pending.sha256) {
     const hash = await sha256File(zipPath);
     if (hash !== pending.sha256) {
-      console.error("SHA256 mismatch — aborting.");
+      log("SHA256 mismatch — aborting.");
       process.exit(1);
     }
   }
 
   const extractDir = join(updatesDir(), "extract");
   rmSync(extractDir, { recursive: true, force: true });
-  console.log("Extracting patch…");
+  log("Extracting patch…");
   expandZip(zipPath, extractDir);
 
   const oldLock = existsSync(join(installRoot, "package-lock.json"))
@@ -127,14 +192,14 @@ async function main() {
   const newLock = existsSync(newLockPath) ? readFileSync(newLockPath, "utf8") : null;
   const depsChanged = Boolean(newLock && newLock !== oldLock);
 
-  console.log("Copying files to", installRoot);
-  copyTree(join(extractDir, "server"), join(installRoot, "server"));
-  copyTree(join(extractDir, "public"), join(installRoot, "public"));
-  copyTree(join(extractDir, "streamdeck-plugin"), join(installRoot, "streamdeck-plugin"));
+  log(`Copying files to ${installRoot}`);
+  await copyTreeWithRetry(join(extractDir, "server"), join(installRoot, "server"));
+  await copyTreeWithRetry(join(extractDir, "public"), join(installRoot, "public"));
+  await copyTreeWithRetry(join(extractDir, "streamdeck-plugin"), join(installRoot, "streamdeck-plugin"));
 
   for (const name of ["package.json", "package-lock.json"]) {
     const src = join(extractDir, name);
-    if (existsSync(src)) cpSync(src, join(installRoot, name));
+    if (existsSync(src)) await copyFileWithRetry(src, join(installRoot, name));
   }
 
   for (const bat of [
@@ -144,11 +209,11 @@ async function main() {
     "Import Stream Deck profile.bat",
   ]) {
     const src = join(extractDir, bat);
-    if (existsSync(src)) cpSync(src, join(installRoot, bat));
+    if (existsSync(src)) await copyFileWithRetry(src, join(installRoot, bat));
   }
 
   if (pending.depsChanged || depsChanged) {
-    console.log("Dependencies changed — running npm ci…");
+    log("Dependencies changed — running npm ci…");
     runNpmCi(installRoot);
   }
 
@@ -160,21 +225,13 @@ async function main() {
     JSON.stringify({ version: pending.version, appliedAt: new Date().toISOString() }, null, 2)
   );
 
-  console.log("Update applied successfully.");
+  log(`Update applied successfully (v${pending.version}).`);
   if (pending.restart) {
-    const startBat = join(installRoot, "Start Riftbound.bat");
-    if (existsSync(startBat)) {
-      console.log("Restarting app…");
-      spawn("cmd.exe", ["/c", "start", '""', startBat], {
-        detached: true,
-        stdio: "ignore",
-        cwd: installRoot,
-      }).unref();
-    }
+    restartApp(installRoot);
   }
 }
 
 main().catch((err) => {
-  console.error(err);
+  log(`Update failed: ${err.stack || err.message}`);
   process.exit(1);
 });
