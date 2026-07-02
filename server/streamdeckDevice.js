@@ -7,6 +7,11 @@ import {
   collectStreamDeckCardIds,
   ensureCardAssets,
 } from "./streamdeckCardAssets.js";
+import {
+  classifyStreamDeckRefresh,
+  findChangedControlKeyIndices,
+  snapshotRevision,
+} from "./streamdeckRevision.js";
 import { logStartup } from "./startupLog.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
@@ -67,11 +72,13 @@ let status = {
   cardsReady: 0,
   cardsTotal: 0,
   cardsMissing: [],
+  refreshMode: null,
   hint: null,
 };
 
-let imageDrawInFlight = false;
+let lastRevision = null;
 let imageDrawGeneration = 0;
+let imageDrawInFlight = false;
 
 function setStatus(patch) {
   status = { ...status, ...patch };
@@ -387,6 +394,119 @@ async function fillKeyWithColorFallback(keyIndex, keyDef) {
   await deck.fillKeyColor(keyIndex, r, g, b);
 }
 
+async function drawKeyIndices(keyIndices, generation, { showProgress = true, partial = false } = {}) {
+  if (!deck || !pages.length || !keyIndices.length) {
+    return { drawn: 0, failed: 0, cancelled: false };
+  }
+  if (status.imageUploadOk === false) {
+    return { drawn: 0, failed: 0, cancelled: false };
+  }
+
+  const page = pages[currentPageIndex];
+  if (!page) return { drawn: 0, failed: 0, cancelled: false };
+
+  const controls = deck.CONTROLS.filter((c) => c.type === "button");
+  const validIndices = new Set(controls.map((c) => c.index));
+  const expectedBytes = keySize * keySize * 3;
+  const indices = keyIndices.filter((idx) => validIndices.has(idx) && page.keys.has(idx));
+  const total = indices.length;
+  let drawn = 0;
+  let failed = 0;
+
+  if (showProgress && total > 0) {
+    setStatus({
+      drawProgress: { done: 0, total, failed: 0, phase: "render", partial },
+      imagesReady: false,
+      imagesDegraded: false,
+      hint: null,
+    });
+  }
+
+  for (const idx of indices) {
+    if (generation !== imageDrawGeneration) {
+      return { drawn, failed, cancelled: true };
+    }
+
+    const keyDef = page.keys.get(idx);
+    if (!keyDef) continue;
+
+    if (showProgress) {
+      setStatus({
+        drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "render", partial },
+      });
+    }
+
+    try {
+      const { renderKeyImage } = await loadImagesMod();
+      const rgb = await withTimeout(
+        renderKeyImage(keyDef, db.data.cardsCache, keySize),
+        KEY_RENDER_TIMEOUT_MS,
+        `Key ${idx} render`
+      );
+      if (rgb.length !== expectedBytes) {
+        throw new Error(`expected ${expectedBytes} bytes, got ${rgb.length}`);
+      }
+
+      if (generation !== imageDrawGeneration) {
+        return { drawn, failed, cancelled: true };
+      }
+
+      if (showProgress) {
+        setStatus({
+          drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "upload", partial },
+        });
+      }
+
+      await withTimeout(
+        fillKeyBufferWithFallback(idx, rgb, { format: "rgb" }),
+        KEY_UPLOAD_TIMEOUT_MS,
+        `Key ${idx} upload`
+      );
+      drawn += 1;
+    } catch (err) {
+      failed += 1;
+      console.error(`[streamdeck] Key ${idx} image failed, using color:`, err.message);
+      logStartup(`[streamdeck] Key ${idx} image failed: ${err.message}`);
+      try {
+        await fillKeyWithColorFallback(idx, keyDef);
+      } catch (fallbackErr) {
+        console.error(`[streamdeck] Key ${idx} color fallback failed:`, fallbackErr.message);
+      }
+    }
+
+    if (showProgress) {
+      setStatus({
+        drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "upload", partial },
+      });
+    }
+    await yieldToEventLoop();
+  }
+
+  if (generation !== imageDrawGeneration) {
+    return { drawn, failed, cancelled: true };
+  }
+
+  if (showProgress) {
+    const imagesDegraded = failed > 0 || status.cardsMissing.length > 0;
+    const imagesReady = drawn > 0 || status.imagesReady;
+    setStatus({
+      drawProgress: null,
+      imagesReady,
+      imagesDegraded: partial ? status.imagesDegraded && failed > 0 : imagesDegraded,
+      imagesDrawnCount: (status.imagesDrawnCount || 0) + drawn,
+      imagesFailedCount: (status.imagesFailedCount || 0) + failed,
+      hint: buildDrawHint({
+        failed,
+        drawn,
+        imageUploadOk: status.imageUploadOk,
+        cardsMissing: status.cardsMissing,
+      }),
+    });
+  }
+
+  return { drawn, failed, cancelled: false };
+}
+
 async function drawCurrentPageImages(generation) {
   if (!deck || !pages.length) return { drawn: 0, failed: 0, cancelled: false };
   if (status.imageUploadOk === false) {
@@ -411,97 +531,24 @@ async function drawCurrentPageImages(generation) {
 
   const controls = deck.CONTROLS.filter((c) => c.type === "button");
   const validIndices = new Set(controls.map((c) => c.index));
-  const expectedBytes = keySize * keySize * 3;
-  const entries = [...page.keys.entries()]
-    .filter(([idx]) => validIndices.has(idx))
-    .sort(([, a], [, b]) => {
-      const aCard = CARD_KEY_TYPES.has(a.type) ? 0 : 1;
-      const bCard = CARD_KEY_TYPES.has(b.type) ? 0 : 1;
+  const keyIndices = [...page.keys.keys()]
+    .filter((idx) => validIndices.has(idx))
+    .sort((a, b) => {
+      const typeA = page.keys.get(a)?.type;
+      const typeB = page.keys.get(b)?.type;
+      const aCard = CARD_KEY_TYPES.has(typeA) ? 0 : 1;
+      const bCard = CARD_KEY_TYPES.has(typeB) ? 0 : 1;
       return aCard - bCard;
     });
-  const total = entries.length;
-  let drawn = 0;
-  let failed = 0;
 
-  setStatus({
-    drawProgress: { done: 0, total, failed: 0, phase: "render" },
-    imagesReady: false,
-    imagesDegraded: false,
-    hint: null,
-  });
+  return drawKeyIndices(keyIndices, generation, { showProgress: true, partial: false });
+}
 
-  for (const [idx, keyDef] of entries) {
-    if (generation !== imageDrawGeneration) {
-      return { drawn, failed, cancelled: true };
-    }
-
-    setStatus({
-      drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "render" },
-    });
-
-    try {
-      const { renderKeyImage } = await loadImagesMod();
-      const rgb = await withTimeout(
-        renderKeyImage(keyDef, db.data.cardsCache, keySize),
-        KEY_RENDER_TIMEOUT_MS,
-        `Key ${idx} render`
-      );
-      if (rgb.length !== expectedBytes) {
-        throw new Error(`expected ${expectedBytes} bytes, got ${rgb.length}`);
-      }
-
-      if (generation !== imageDrawGeneration) {
-        return { drawn, failed, cancelled: true };
-      }
-
-      setStatus({
-        drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "upload" },
-      });
-
-      await withTimeout(
-        fillKeyBufferWithFallback(idx, rgb, { format: "rgb" }),
-        KEY_UPLOAD_TIMEOUT_MS,
-        `Key ${idx} upload`
-      );
-      drawn += 1;
-    } catch (err) {
-      failed += 1;
-      console.error(`[streamdeck] Key ${idx} image failed, using color:`, err.message);
-      logStartup(`[streamdeck] Key ${idx} image failed: ${err.message}`);
-      try {
-        await fillKeyWithColorFallback(idx, keyDef);
-      } catch (fallbackErr) {
-        console.error(`[streamdeck] Key ${idx} color fallback failed:`, fallbackErr.message);
-      }
-    }
-
-    setStatus({
-      drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "upload" },
-    });
-    await yieldToEventLoop();
-  }
-
-  if (generation !== imageDrawGeneration) {
-    return { drawn, failed, cancelled: true };
-  }
-
-  const imagesDegraded = failed > 0 || status.cardsMissing.length > 0;
-  const imagesReady = drawn > 0;
-  setStatus({
-    drawProgress: null,
-    imagesReady,
-    imagesDegraded,
-    imagesDrawnCount: drawn,
-    imagesFailedCount: failed,
-    hint: buildDrawHint({
-      failed,
-      drawn,
-      imageUploadOk: status.imageUploadOk,
-      cardsMissing: status.cardsMissing,
-    }),
-  });
-
-  return { drawn, failed, cancelled: false };
+async function drawKeysPartial(keyIndices, { skipProgress = true } = {}) {
+  if (!deck || !keyIndices.length || status.imageUploadOk === false) return;
+  imageDrawGeneration += 1;
+  const gen = imageDrawGeneration;
+  await drawKeyIndices(keyIndices, gen, { showProgress: !skipProgress, partial: true });
 }
 
 async function runImageDraw(generation) {
@@ -561,13 +608,24 @@ export async function refreshStreamDeck(force = false) {
   if (refreshInFlight) return;
   refreshInFlight = true;
   try {
+    deviceKey = detectDeviceKey(deck);
+    const oldPages = pages;
+    const mode = force ? "full" : classifyStreamDeckRefresh(lastRevision, db.data, deviceKey);
+
+    if (mode === "skip" && !force) {
+      setStatus({ refreshMode: "skip" });
+      return;
+    }
+
     if (force) {
       const { clearImageCaches } = await loadImagesMod();
       clearImageCaches();
     }
-    deviceKey = detectDeviceKey(deck);
+
     pages = buildPages(db.data, deviceKey);
     if (currentPageIndex >= pages.length) currentPageIndex = 0;
+    lastRevision = snapshotRevision(db.data, deviceKey);
+
     setStatus({
       deviceKey,
       pageCount: pages.length,
@@ -575,9 +633,24 @@ export async function refreshStreamDeck(force = false) {
       currentPage: currentPageIndex,
       error: null,
       phase: "connected",
+      refreshMode: mode,
     });
-    await drawCurrentPageColorsOnly();
-    await schedulePrefetchAndDraw();
+
+    if (force || mode === "full") {
+      await drawCurrentPageColorsOnly();
+      await schedulePrefetchAndDraw();
+      return;
+    }
+
+    if (mode === "partial") {
+      if (currentPageIndex === 0) {
+        const changed = findChangedControlKeyIndices(oldPages[0], pages[0]);
+        if (changed.length) {
+          await drawKeysPartial(changed);
+        }
+      }
+      return;
+    }
   } catch (err) {
     console.error("[streamdeck] Refresh failed:", err);
     setStatus({ error: formatError(err), phase: "error" });
@@ -698,6 +771,7 @@ export async function startStreamDeck() {
     deviceKey = detectDeviceKey(deck);
     currentPageIndex = 0;
     pages = buildPages(db.data, deviceKey);
+    lastRevision = snapshotRevision(db.data, deviceKey);
 
     setStatus({
       error: null,
@@ -766,6 +840,7 @@ export async function stopStreamDeck() {
   deck = null;
   pages = [];
   currentPageIndex = 0;
+  lastRevision = null;
   setStatus({
     connected: false,
     phase: "idle",
@@ -789,5 +864,6 @@ export async function stopStreamDeck() {
     cardsTotal: 0,
     cardsMissing: [],
     hint: null,
+    refreshMode: null,
   });
 }

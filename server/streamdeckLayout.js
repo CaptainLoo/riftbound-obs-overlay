@@ -56,12 +56,25 @@ function enrichGamePointLabel(def, data) {
   return `${prefix} ${delta > 0 ? "+" : "−"} (${pts})`;
 }
 
-function enrichBattlefieldLabel(def, data) {
+function enrichBattlefieldDef(def, data) {
   const player = def.settings?.player;
   const cardId = def.settings?.cardId;
   const current = data.match?.games?.[data.match?.currentGame ?? 0]?.battlefield?.[player];
   const active = current === cardId;
-  return `${active ? "✓ " : ""}${def.label}`;
+  def.active = active;
+  const base = String(def.label || "").replace(/^✓\s*/, "");
+  def.label = active ? `✓ ${base}` : base;
+  return def;
+}
+
+function enrichSelectGameDef(def, data) {
+  const idx = Number(def.settings?.index) || 0;
+  const current = data.match?.currentGame ?? 0;
+  const active = idx === current;
+  def.active = active;
+  const base = String(def.label || "").replace(/^[●]\s*/, "");
+  def.label = active ? `● ${base}` : base;
+  return def;
 }
 
 function buildControlKeys(device, data) {
@@ -75,9 +88,9 @@ function buildControlKeys(device, data) {
     putKey(keys, device, 0, 0, { type: "hideAll", label: "Hide all", icon: "hide" });
     putKey(keys, device, 1, 0, { type: "matchup", label: "Matchup", icon: "matchup" });
     putKey(keys, device, 2, 0, { type: "resetMatch", label: "Reset", icon: "reset" });
-    putKey(keys, device, 3, 0, { type: "selectGame", label: "Game 1", icon: "game", settings: { index: 0 } });
-    putKey(keys, device, 4, 0, { type: "selectGame", label: "Game 2", icon: "game", settings: { index: 1 } });
-    putKey(keys, device, 5, 0, { type: "selectGame", label: "Game 3", icon: "game", settings: { index: 2 } });
+    putKey(keys, device, 3, 0, enrichSelectGameDef({ type: "selectGame", label: "Game 1", icon: "game", settings: { index: 0 } }, data));
+    putKey(keys, device, 4, 0, enrichSelectGameDef({ type: "selectGame", label: "Game 2", icon: "game", settings: { index: 1 } }, data));
+    putKey(keys, device, 5, 0, enrichSelectGameDef({ type: "selectGame", label: "Game 3", icon: "game", settings: { index: 2 } }, data));
     putKey(keys, device, 6, 0, { type: "winGame", label: "P1 Win", icon: "win", settings: { player: "p1" } });
     putKey(keys, device, 7, 0, { type: "winGame", label: "P2 Win", icon: "win", settings: { player: "p2" } });
     putKey(keys, device, 0, 1, { type: "hidePlayer", label: "Hide P1", icon: "hide", settings: { player: "p1" } });
@@ -116,7 +129,7 @@ function buildControlKeys(device, data) {
         settings: { player: "p1", cardId: bf.id },
         cardId: bf.id,
       };
-      def.label = enrichBattlefieldLabel(def, data);
+      enrichBattlefieldDef(def, data);
       putKey(keys, device, i, 2, def);
     });
 
@@ -129,15 +142,15 @@ function buildControlKeys(device, data) {
         settings: { player: "p2", cardId: bf.id },
         cardId: bf.id,
       };
-      def.label = enrichBattlefieldLabel(def, data);
+      enrichBattlefieldDef(def, data);
       putKey(keys, device, 1 + i, 3, def);
     });
   } else if (device.cols >= 5 && device.rows >= 3) {
     putKey(keys, device, 0, 0, { type: "hideAll", label: "Hide", icon: "hide" });
     putKey(keys, device, 1, 0, { type: "matchup", label: "Matchup", icon: "matchup" });
-    putKey(keys, device, 2, 0, { type: "selectGame", label: "G1", icon: "game", settings: { index: 0 } });
-    putKey(keys, device, 3, 0, { type: "selectGame", label: "G2", icon: "game", settings: { index: 1 } });
-    putKey(keys, device, 4, 0, { type: "selectGame", label: "G3", icon: "game", settings: { index: 2 } });
+    putKey(keys, device, 2, 0, enrichSelectGameDef({ type: "selectGame", label: "G1", icon: "game", settings: { index: 0 } }, data));
+    putKey(keys, device, 3, 0, enrichSelectGameDef({ type: "selectGame", label: "G2", icon: "game", settings: { index: 1 } }, data));
+    putKey(keys, device, 4, 0, enrichSelectGameDef({ type: "selectGame", label: "G3", icon: "game", settings: { index: 2 } }, data));
     putKey(keys, device, 0, 1, { type: "resetMatch", label: "Reset", icon: "reset" });
     putKey(keys, device, 1, 1, { type: "winGame", label: "P1 Win", icon: "win", settings: { player: "p1" } });
     putKey(keys, device, 2, 1, {
@@ -166,7 +179,7 @@ function buildControlKeys(device, data) {
         settings: { player: "p1", cardId: bf.id },
         cardId: bf.id,
       };
-      def.label = enrichBattlefieldLabel(def, data);
+      enrichBattlefieldDef(def, data);
       putKey(keys, device, 1 + i, 2, def);
     });
     p2Bfs.slice(0, 2).forEach((bf, i) => {
@@ -177,7 +190,7 @@ function buildControlKeys(device, data) {
         settings: { player: "p2", cardId: bf.id },
         cardId: bf.id,
       };
-      def.label = enrichBattlefieldLabel(def, data);
+      enrichBattlefieldDef(def, data);
       putKey(keys, device, 3 + i, 2, def);
     });
   } else {

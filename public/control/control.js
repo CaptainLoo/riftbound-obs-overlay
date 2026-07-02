@@ -657,6 +657,7 @@ async function renderStreamDeck() {
         );
       } else if (
         info.drawProgress &&
+        !info.drawProgress.partial &&
         info.drawProgress.total > 0 &&
         info.drawProgress.done < info.drawProgress.total
       ) {

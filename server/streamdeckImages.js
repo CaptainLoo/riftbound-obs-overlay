@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { CARDS_DIR } from "./paths.js";
 
@@ -29,6 +28,7 @@ export function getIconColorForKeyDef(keyDef) {
 }
 
 const labelCache = new Map();
+const cardArtCache = new Map();
 const cardCache = new Map();
 
 function escapeXml(text) {
@@ -64,8 +64,45 @@ function assertRgbBuffer(buffer, size, label) {
   return buffer;
 }
 
-export async function renderLabelImage(label, iconKey, size = 96) {
-  const cacheKey = `${size}:${iconKey}:${label}`;
+async function localCardPath(thumbLocal) {
+  if (!thumbLocal) return null;
+  const file = basename(thumbLocal);
+  const abs = join(CARDS_DIR, file);
+  return existsSync(abs) ? abs : null;
+}
+
+async function renderCardArtOnly(cardId, cardsCache, size = 96) {
+  const cacheKey = `${size}:${cardId}`;
+  if (cardArtCache.has(cacheKey)) return cardArtCache.get(cacheKey);
+
+  const meta = cardsCache?.[cardId];
+  const src = await localCardPath(meta?.thumbLocal || meta?.imageLocal);
+  if (!src) return null;
+
+  const sharp = await getSharp();
+  const raw = await sharp(src)
+    .resize(size, size, { fit: "cover", position: "centre" })
+    .removeAlpha()
+    .raw({ channels: 3 })
+    .toBuffer();
+
+  const rgb = assertRgbBuffer(raw, size, `card art ${cardId}`);
+  cardArtCache.set(cacheKey, rgb);
+  return rgb;
+}
+
+function activeBorderSvg(size) {
+  const inset = 2;
+  const stroke = 4;
+  return Buffer.from(`<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
+  <rect x="${inset}" y="${inset}" width="${size - inset * 2}" height="${size - inset * 2}"
+    fill="none" stroke="#3fb964" stroke-width="${stroke}"/>
+</svg>`);
+}
+
+export async function renderLabelImage(label, iconKey, size = 96, options = {}) {
+  const active = Boolean(options.active);
+  const cacheKey = `${size}:${iconKey}:${label}:${active}`;
   if (labelCache.has(cacheKey)) return labelCache.get(cacheKey);
 
   const [r, g, b] = ICON_COLORS[iconKey] || ICON_COLORS.game;
@@ -77,8 +114,13 @@ export async function renderLabelImage(label, iconKey, size = 96) {
     .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : lineHeight}">${escapeXml(line)}</tspan>`)
     .join("");
 
+  const border = active
+    ? `<rect x="2" y="2" width="${size - 4}" height="${size - 4}" fill="none" stroke="#3fb964" stroke-width="4"/>`
+    : "";
+
   const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
   <rect width="100%" height="100%" fill="rgb(${r},${g},${b})"/>
+  ${border}
   <text x="50%" y="${startY}" text-anchor="middle" fill="#ffffff" font-family="Segoe UI, Arial, sans-serif" font-size="${fontSize}" font-weight="600">${tspans}</text>
 </svg>`;
 
@@ -93,21 +135,14 @@ export async function renderLabelImage(label, iconKey, size = 96) {
   return rgb;
 }
 
-async function localCardPath(thumbLocal) {
-  if (!thumbLocal) return null;
-  const file = basename(thumbLocal);
-  const abs = join(CARDS_DIR, file);
-  return existsSync(abs) ? abs : null;
-}
-
-export async function renderCardKeyImage(cardId, cardsCache, label, size = 96) {
-  const cacheKey = `${size}:${cardId}:${label}`;
+export async function renderCardKeyImage(cardId, cardsCache, label, size = 96, options = {}) {
+  const active = Boolean(options.active);
+  const cacheKey = `${size}:${cardId}:${label}:${active}`;
   if (cardCache.has(cacheKey)) return cardCache.get(cacheKey);
 
-  const meta = cardsCache?.[cardId];
-  const src = await localCardPath(meta?.thumbLocal || meta?.imageLocal);
-  if (!src) {
-    return renderLabelImage(label || cardId, "show", size);
+  const art = await renderCardArtOnly(cardId, cardsCache, size);
+  if (!art) {
+    return renderLabelImage(label || cardId, "show", size, { active });
   }
 
   const lines = wrapLabel(label, 12);
@@ -122,9 +157,13 @@ export async function renderCardKeyImage(cardId, cardsCache, label, size = 96) {
 </svg>`);
 
   const sharp = await getSharp();
-  const raw = await sharp(src)
-    .resize(size, size, { fit: "cover", position: "centre" })
-    .composite([{ input: overlaySvg, top: size - barH, left: 0 }])
+  const composites = [{ input: overlaySvg, top: size - barH, left: 0 }];
+  if (active) {
+    composites.push({ input: activeBorderSvg(size), top: 0, left: 0 });
+  }
+
+  const raw = await sharp(art, { raw: { width: size, height: size, channels: 3 } })
+    .composite(composites)
     .removeAlpha()
     .raw({ channels: 3 })
     .toBuffer();
@@ -135,26 +174,31 @@ export async function renderCardKeyImage(cardId, cardsCache, label, size = 96) {
 }
 
 export async function renderKeyImage(keyDef, cardsCache, size = 96) {
+  const active = Boolean(keyDef.active);
   if (keyDef.type === "showCard" || keyDef.type === "battlefield") {
     const cardId = keyDef.cardId || keyDef.settings?.cardId;
     if (cardId) {
-      return renderCardKeyImage(cardId, cardsCache, keyDef.label, size);
+      return renderCardKeyImage(cardId, cardsCache, keyDef.label, size, { active });
     }
   }
   const icon = keyDef.type === "navPrev" || keyDef.type === "navNext" ? "nav" : keyDef.icon || "game";
-  return renderLabelImage(keyDef.label, icon, size);
+  return renderLabelImage(keyDef.label, icon, size, { active });
 }
 
 export function invalidateCardCache(cardId) {
   if (!cardId) return;
-  const needle = `:${cardId}:`;
+  const needle = `:${cardId}`;
+  for (const key of cardArtCache.keys()) {
+    if (key.includes(needle)) cardArtCache.delete(key);
+  }
   for (const key of cardCache.keys()) {
-    if (key.includes(needle)) cardCache.delete(key);
+    if (key.includes(`:${cardId}:`)) cardCache.delete(key);
   }
 }
 
 export function clearImageCaches() {
   labelCache.clear();
+  cardArtCache.clear();
   cardCache.clear();
 }
 

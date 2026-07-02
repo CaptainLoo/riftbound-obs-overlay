@@ -37,6 +37,7 @@ function idleStatus(error = null) {
     cardsReady: 0,
     cardsTotal: 0,
     cardsMissing: [],
+    refreshMode: null,
     hint: null,
   };
 }
