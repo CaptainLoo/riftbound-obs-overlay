@@ -142,15 +142,23 @@ function destroyTray() {
   }
 }
 
+function trayIconPath() {
+  if (app.isPackaged) {
+    const external = path.join(process.resourcesPath, "icon.png");
+    if (fs.existsSync(external)) return external;
+  }
+  return path.join(__dirname, "icon.png");
+}
+
 function createTray() {
   if (process.env.RIFTBOUND_NO_TRAY === "1") {
     logStartup("Tray skipped (RIFTBOUND_NO_TRAY=1)");
     return;
   }
-  const iconPath = path.join(__dirname, "icon.png");
+  const iconPath = trayIconPath();
   const icon = nativeImage.createFromPath(iconPath);
   if (icon.isEmpty()) {
-    logStartup("Tray skipped — icon not found or empty");
+    logStartup(`Tray skipped — icon empty (${iconPath})`);
     return;
   }
   tray = new Tray(icon);
@@ -188,7 +196,7 @@ function createWindow(port) {
     minWidth: 960,
     minHeight: 640,
     title: "Riftbound OBS — Control",
-    icon: path.join(__dirname, "icon.png"),
+    icon: trayIconPath(),
     autoHideMenuBar: false,
     show: false,
     webPreferences: {

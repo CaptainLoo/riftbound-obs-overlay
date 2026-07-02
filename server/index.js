@@ -64,9 +64,7 @@ export async function startServer(options = {}) {
   console.log(`  Overlay (Browser Source) : http://localhost:${port}/overlay`);
   console.log(`  Control panel            : http://localhost:${port}/control`);
   if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
-  if (IS_ELECTRON && process.platform === "win32") {
-    setTimeout(() => startStreamDeckSafe(), 8000);
-  }
+  /* Stream Deck HID runs in a separate worker — connect via control panel → Stream Deck → Reconnect */
 
   if (openBrowser) {
     exec(`start http://localhost:${port}/control`);
