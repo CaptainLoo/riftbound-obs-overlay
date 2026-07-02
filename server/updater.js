@@ -140,11 +140,25 @@ async function fetchLatestManifest() {
   return manifest;
 }
 
+function nodeMajorMinor(version) {
+  const parts = String(version || "")
+    .replace(/^v/, "")
+    .split(".");
+  return `${parseInt(parts[0], 10) || 0}.${parseInt(parts[1], 10) || 0}`;
+}
+
+function nodeRuntimeMismatch(manifestNode, bundledNode) {
+  if (!manifestNode || !bundledNode) return false;
+  // Electron patches never replace the embedded runtime — only compare for legacy portable.
+  if (IS_ELECTRON) return false;
+  return nodeMajorMinor(manifestNode) !== nodeMajorMinor(bundledNode);
+}
+
 function resolveUpdateMode(manifest, currentVersion) {
   if (compareSemver(manifest.version, currentVersion) <= 0) return null;
   if (manifest.forceFull) return "installer";
   const bundledNode = getBundledNodeVersion();
-  if (manifest.nodeVersion && bundledNode && manifest.nodeVersion !== bundledNode) {
+  if (nodeRuntimeMismatch(manifest.nodeVersion, bundledNode)) {
     return "installer";
   }
   if (manifest.minPatchFrom && compareSemver(currentVersion, manifest.minPatchFrom) < 0) {
@@ -349,7 +363,18 @@ export async function downloadUpdate() {
     let pending;
 
     if (status.updateMode === "installer") {
-      if (!status.installer?.url) throw new Error("No installer asset in the latest release.");
+      if (!status.installer?.url) {
+        if (status.patch?.url || status.patch?.file) {
+          status.updateMode = "patch";
+        } else {
+          throw new Error(
+            "Full installer not uploaded yet. Wait a few minutes for CI, or download riftbound-setup from GitHub Releases."
+          );
+        }
+      }
+    }
+
+    if (status.updateMode === "installer") {
       const dest = join(
         updatesDir(),
         status.installer.file || `riftbound-setup-${status.latestVersion}.exe`
