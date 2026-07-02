@@ -4,6 +4,9 @@ import { db } from "./db.js";
 import { CARDS_DIR } from "./paths.js";
 import { repairCardAsset } from "./riftscribe.js";
 import { buildPages } from "./streamdeckLayout.js";
+import { runPool } from "./streamdeckImageWarm.js";
+
+const DOWNLOAD_CONCURRENCY = 6;
 
 function cardIdFromKeyDef(keyDef) {
   return keyDef?.cardId || keyDef?.settings?.cardId || null;
@@ -59,26 +62,32 @@ export function countReadyAssets(cardIds) {
  */
 export async function ensureCardAssets(cardIds, onProgress) {
   const unique = [...new Set(cardIds.filter(Boolean))];
-  let done = 0;
   const failed = [];
+  const repairedIds = [];
+  let done = 0;
 
-  for (const id of unique) {
+  const tasks = unique.map((id) => async () => {
     try {
       if (!hasLocalCardAsset(id)) {
         await repairCardAsset(id);
+        repairedIds.push(id);
       }
     } catch (err) {
       failed.push(id);
       console.warn(`[streamdeck] card asset ${id}: ${err.message}`);
+    } finally {
+      done += 1;
+      onProgress?.({ done, total: unique.length, current: id });
     }
-    done += 1;
-    onProgress?.({ done, total: unique.length, current: id });
-  }
+  });
+
+  await runPool(tasks, DOWNLOAD_CONCURRENCY);
 
   const { ready, total, missing } = countReadyAssets(unique);
   return {
     ready,
     total,
     missing: [...new Set([...missing, ...failed])],
+    repairedIds,
   };
 }

@@ -5,8 +5,10 @@ import { buildPages, detectDeviceKey } from "./streamdeckLayout.js";
 import {
   collectPageCardIds,
   collectStreamDeckCardIds,
+  countReadyAssets,
   ensureCardAssets,
 } from "./streamdeckCardAssets.js";
+import { warmAdjacentPages } from "./streamdeckImageWarm.js";
 import {
   classifyStreamDeckRefresh,
   findChangedControlKeyIndices,
@@ -19,6 +21,7 @@ const API = `http://127.0.0.1:${DEFAULT_PORT}/api`;
 const KEY_RENDER_TIMEOUT_MS = 8000;
 const KEY_UPLOAD_TIMEOUT_MS = 20000;
 const PROBE_UPLOAD_TIMEOUT_MS = 5000;
+const RENDER_CONCURRENCY = 4;
 const CARD_KEY_TYPES = new Set(["showCard", "battlefield"]);
 
 let nodeLib = null;
@@ -245,9 +248,11 @@ async function prefetchCardAssets(cardIds) {
     setStatus({ cardPrefetch: progress });
   });
 
-  const { invalidateCardCache } = await loadImagesMod();
-  for (const id of cardIds) {
-    invalidateCardCache(id);
+  if (result.repairedIds?.length) {
+    const { invalidateCardCache } = await loadImagesMod();
+    for (const id of result.repairedIds) {
+      invalidateCardCache(id);
+    }
   }
 
   setStatus({
@@ -394,6 +399,55 @@ async function fillKeyWithColorFallback(keyIndex, keyDef) {
   await deck.fillKeyColor(keyIndex, r, g, b);
 }
 
+function scheduleAdjacentWarm() {
+  if (!deck || !pages.length || status.imageUploadOk === false) return;
+  setImmediate(() => {
+    loadImagesMod()
+      .then(({ renderKeyImage }) =>
+        warmAdjacentPages(pages, currentPageIndex, db.data.cardsCache, keySize, renderKeyImage)
+      )
+      .catch((err) => logStartup(`[streamdeck] adjacent warm failed: ${err.message}`));
+  });
+}
+
+async function renderKeysBatch(indices, page, generation, { onProgress } = {}) {
+  const { renderKeyImage } = await loadImagesMod();
+  const expectedBytes = keySize * keySize * 3;
+  const results = new Map();
+  let next = 0;
+
+  const workers = Array.from(
+    { length: Math.min(RENDER_CONCURRENCY, indices.length) },
+    async () => {
+      while (next < indices.length) {
+        if (generation !== imageDrawGeneration) return;
+        const slot = next++;
+        const idx = indices[slot];
+        const keyDef = page.keys.get(idx);
+        if (!keyDef) continue;
+
+        try {
+          const rgb = await withTimeout(
+            renderKeyImage(keyDef, db.data.cardsCache, keySize),
+            KEY_RENDER_TIMEOUT_MS,
+            `Key ${idx} render`
+          );
+          if (rgb.length !== expectedBytes) {
+            throw new Error(`expected ${expectedBytes} bytes, got ${rgb.length}`);
+          }
+          results.set(idx, { idx, rgb, keyDef, ok: true });
+        } catch (err) {
+          results.set(idx, { idx, keyDef, ok: false, error: err });
+        }
+        onProgress?.(idx);
+      }
+    }
+  );
+
+  await Promise.all(workers);
+  return indices.map((idx) => results.get(idx)).filter(Boolean);
+}
+
 async function drawKeyIndices(keyIndices, generation, { showProgress = true, partial = false } = {}) {
   if (!deck || !pages.length || !keyIndices.length) {
     return { drawn: 0, failed: 0, cancelled: false };
@@ -407,7 +461,6 @@ async function drawKeyIndices(keyIndices, generation, { showProgress = true, par
 
   const controls = deck.CONTROLS.filter((c) => c.type === "button");
   const validIndices = new Set(controls.map((c) => c.index));
-  const expectedBytes = keySize * keySize * 3;
   const indices = keyIndices.filter((idx) => validIndices.has(idx) && page.keys.has(idx));
   const total = indices.length;
   let drawn = 0;
@@ -422,51 +475,75 @@ async function drawKeyIndices(keyIndices, generation, { showProgress = true, par
     });
   }
 
-  for (const idx of indices) {
+  if (generation !== imageDrawGeneration) {
+    return { drawn: 0, failed: 0, cancelled: true };
+  }
+
+  let renderedDone = 0;
+  const batch = await renderKeysBatch(indices, page, generation, {
+    onProgress: () => {
+      renderedDone += 1;
+      if (showProgress) {
+        setStatus({
+          drawProgress: {
+            done: 0,
+            total,
+            failed: 0,
+            phase: "render",
+            partial,
+            renderDone: renderedDone,
+          },
+        });
+      }
+    },
+  });
+
+  if (generation !== imageDrawGeneration) {
+    return { drawn: 0, failed: 0, cancelled: true };
+  }
+
+  for (const item of batch) {
     if (generation !== imageDrawGeneration) {
       return { drawn, failed, cancelled: true };
     }
 
-    const keyDef = page.keys.get(idx);
-    if (!keyDef) continue;
+    const { idx, keyDef } = item;
 
-    if (showProgress) {
-      setStatus({
-        drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "render", partial },
-      });
-    }
-
-    try {
-      const { renderKeyImage } = await loadImagesMod();
-      const rgb = await withTimeout(
-        renderKeyImage(keyDef, db.data.cardsCache, keySize),
-        KEY_RENDER_TIMEOUT_MS,
-        `Key ${idx} render`
-      );
-      if (rgb.length !== expectedBytes) {
-        throw new Error(`expected ${expectedBytes} bytes, got ${rgb.length}`);
+    if (!item.ok) {
+      failed += 1;
+      console.error(`[streamdeck] Key ${idx} image failed, using color:`, item.error?.message);
+      logStartup(`[streamdeck] Key ${idx} image failed: ${item.error?.message}`);
+      try {
+        await fillKeyWithColorFallback(idx, keyDef);
+      } catch (fallbackErr) {
+        console.error(`[streamdeck] Key ${idx} color fallback failed:`, fallbackErr.message);
       }
-
-      if (generation !== imageDrawGeneration) {
-        return { drawn, failed, cancelled: true };
-      }
-
       if (showProgress) {
         setStatus({
           drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "upload", partial },
         });
       }
+      await yieldToEventLoop();
+      continue;
+    }
 
+    if (showProgress) {
+      setStatus({
+        drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "upload", partial },
+      });
+    }
+
+    try {
       await withTimeout(
-        fillKeyBufferWithFallback(idx, rgb, { format: "rgb" }),
+        fillKeyBufferWithFallback(idx, item.rgb, { format: "rgb" }),
         KEY_UPLOAD_TIMEOUT_MS,
         `Key ${idx} upload`
       );
       drawn += 1;
     } catch (err) {
       failed += 1;
-      console.error(`[streamdeck] Key ${idx} image failed, using color:`, err.message);
-      logStartup(`[streamdeck] Key ${idx} image failed: ${err.message}`);
+      console.error(`[streamdeck] Key ${idx} upload failed, using color:`, err.message);
+      logStartup(`[streamdeck] Key ${idx} upload failed: ${err.message}`);
       try {
         await fillKeyWithColorFallback(idx, keyDef);
       } catch (fallbackErr) {
@@ -526,7 +603,10 @@ async function drawCurrentPageImages(generation) {
 
   const pageIds = collectPageCardIds(page);
   if (pageIds.length) {
-    await prefetchCardAssets(pageIds);
+    const { ready, total } = countReadyAssets(pageIds);
+    if (ready < total) {
+      await prefetchCardAssets(pageIds);
+    }
   }
 
   const controls = deck.CONTROLS.filter((c) => c.type === "button");
@@ -554,8 +634,10 @@ async function drawKeysPartial(keyIndices, { skipProgress = true } = {}) {
 async function runImageDraw(generation) {
   if (!deck || generation !== imageDrawGeneration) return;
   imageDrawInFlight = true;
+  let cancelled = false;
   try {
-    await drawCurrentPageImages(generation);
+    const result = await drawCurrentPageImages(generation);
+    cancelled = result.cancelled;
   } catch (err) {
     console.error("[streamdeck] Background image draw failed:", err.message);
     logStartup("[streamdeck] Background image draw failed", err);
@@ -568,6 +650,9 @@ async function runImageDraw(generation) {
     }
   } finally {
     imageDrawInFlight = false;
+    if (!cancelled && generation === imageDrawGeneration) {
+      scheduleAdjacentWarm();
+    }
     if (deck && generation !== imageDrawGeneration) {
       runImageDraw(imageDrawGeneration);
     }

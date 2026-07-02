@@ -71,7 +71,7 @@ async function localCardPath(thumbLocal) {
   return existsSync(abs) ? abs : null;
 }
 
-async function renderCardArtOnly(cardId, cardsCache, size = 96) {
+export async function renderCardArtOnly(cardId, cardsCache, size = 96) {
   const cacheKey = `${size}:${cardId}`;
   if (cardArtCache.has(cacheKey)) return cardArtCache.get(cacheKey);
 
