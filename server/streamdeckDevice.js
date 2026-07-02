@@ -42,6 +42,8 @@ let status = {
   pageCount: 0,
   pageNames: [],
   error: null,
+  devicesFound: [],
+  lastScanAt: null,
 };
 
 function setStatus(patch) {
@@ -225,6 +227,45 @@ export function getStreamDeckStatus() {
   return { ...status };
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function scanStreamDecks(maxAttempts = 6, delayMs = 1500) {
+  const { listStreamDecks } = await loadNodeLib();
+  let lastErr = null;
+  let devices = [];
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      devices = await listStreamDecks();
+      const summary = devices.map((d) => ({
+        path: d.path,
+        model: d.model,
+        serialNumber: d.serialNumber ?? null,
+      }));
+      setStatus({
+        devicesFound: summary,
+        lastScanAt: new Date().toISOString(),
+        error: devices.length ? null : status.error,
+      });
+      if (devices.length) return devices;
+      lastErr = null;
+    } catch (err) {
+      lastErr = err;
+      console.error(`[streamdeck] Scan attempt ${attempt} failed:`, err.message);
+      setStatus({
+        lastScanAt: new Date().toISOString(),
+        devicesFound: [],
+      });
+    }
+    if (attempt < maxAttempts) await sleep(delayMs);
+  }
+
+  if (lastErr) throw lastErr;
+  return devices;
+}
+
 export async function startStreamDeck() {
   if (!status.supported) {
     setStatus({ connected: false, error: null });
@@ -233,12 +274,13 @@ export async function startStreamDeck() {
   if (deck) return;
 
   try {
-    const { DeviceModelId, listStreamDecks, openStreamDeck } = await loadNodeLib();
-    const devices = await listStreamDecks();
+    const { DeviceModelId, openStreamDeck } = await loadNodeLib();
+    const devices = await scanStreamDecks();
     if (!devices.length) {
       setStatus({
         connected: false,
-        error: "No Stream Deck detected. Plug in your device and restart Riftbound OBS.",
+        error:
+          "No Stream Deck detected. Quit the Elgato Stream Deck app (check system tray and Task Manager for StreamDeck.exe), then click Reconnect.",
       });
       return;
     }

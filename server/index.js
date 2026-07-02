@@ -64,7 +64,10 @@ export async function startServer(options = {}) {
   console.log(`  Overlay (Browser Source) : http://localhost:${port}/overlay`);
   console.log(`  Control panel            : http://localhost:${port}/control`);
   if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
-  /* Stream Deck HID runs in a separate worker — connect via control panel → Stream Deck → Reconnect */
+  /* Stream Deck HID runs in a separate worker — auto-starts shortly after boot */
+  setTimeout(() => {
+    startStreamDeckSafe().catch((err) => logStartup("[streamdeck] auto-start failed", err));
+  }, 3000);
 
   if (openBrowser) {
     exec(`start http://localhost:${port}/control`);

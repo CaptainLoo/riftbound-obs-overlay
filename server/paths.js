@@ -48,6 +48,10 @@ export function getInstallRoot() {
 
 /** Patchable app content (server, public, package.json). */
 export function getContentRoot() {
+  if (process.env.RIFTBOUND_CONTENT_ROOT) {
+    const explicit = process.env.RIFTBOUND_CONTENT_ROOT.replace(/[\\/]+$/, "");
+    if (existsSync(join(explicit, "server"))) return explicit;
+  }
   if (IS_ELECTRON && process.env.RIFTBOUND_DEV === "1") {
     return DEV_ROOT;
   }

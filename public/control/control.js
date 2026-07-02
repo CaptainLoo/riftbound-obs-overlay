@@ -596,6 +596,9 @@ document.getElementById("show-matchup").addEventListener("click", toggleMatchup)
 
 // ---- Stream Deck (native HID) ---------------------------------------------
 
+let sdPollTimer = null;
+let sdAutoConnectDone = false;
+
 async function renderStreamDeck() {
   const badge = document.getElementById("sd-hid-status");
   const detail = document.getElementById("sd-hid-detail");
@@ -627,10 +630,18 @@ async function renderStreamDeck() {
       if (info.firmwareVersion) parts.push(`FW ${info.firmwareVersion}`);
       detail.textContent = parts.join(" · ");
       if (hint) hint.textContent = info.hint || "";
+    } else if (info.worker && !info.error && !info.lastScanAt) {
+      badge.textContent = "Connecting…";
+      badge.className = "sd-status-badge sd-status-warn";
+      detail.textContent = "Scanning for Stream Deck…";
+      if (hint) hint.textContent = info.hint || "";
     } else if (info.error) {
       badge.textContent = "Error";
       badge.className = "sd-status-badge sd-status-err";
       detail.textContent = info.error;
+      if (info.devicesFound?.length) {
+        detail.textContent += ` (HID scan: ${info.devicesFound.length} device(s))`;
+      }
       if (hint) {
         hint.textContent =
           info.hint || "Quit the Elgato Stream Deck app completely, then click Reconnect.";
@@ -638,7 +649,9 @@ async function renderStreamDeck() {
     } else {
       badge.textContent = "Not detected";
       badge.className = "sd-status-badge sd-status-warn";
-      detail.textContent = "Plug in your Stream Deck and keep Riftbound OBS running.";
+      detail.textContent = info.devicesFound?.length
+        ? `HID scan found ${info.devicesFound.length} device(s).`
+        : "Plug in your Stream Deck and keep Riftbound OBS running.";
       if (hint) hint.textContent = info.hint || "";
     }
 
@@ -657,6 +670,33 @@ async function renderStreamDeck() {
   }
 }
 
+function stopStreamDeckPoll() {
+  clearInterval(sdPollTimer);
+  sdPollTimer = null;
+}
+
+function startStreamDeckPoll() {
+  stopStreamDeckPoll();
+  sdPollTimer = setInterval(() => renderStreamDeck(), 2000);
+}
+
+async function autoConnectStreamDeck() {
+  if (sdAutoConnectDone) return;
+  try {
+    const res = await fetch("/api/streamdeck");
+    const info = await res.json();
+    if (!info.supported || info.connected) {
+      sdAutoConnectDone = true;
+      return;
+    }
+    sdAutoConnectDone = true;
+    await fetch("/api/streamdeck/reconnect", { method: "POST" });
+    await renderStreamDeck();
+  } catch {
+    /* ignore — user can click Reconnect */
+  }
+}
+
 const sdReconnect = document.getElementById("sd-reconnect");
 if (sdReconnect) {
   sdReconnect.addEventListener("click", async () => {
@@ -667,7 +707,7 @@ if (sdReconnect) {
       const res = await fetch("/api/streamdeck/reconnect", { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || res.statusText || "Reconnect failed");
-      toast(body.connected ? "Stream Deck connected" : "Stream Deck not detected");
+      toast(body.connected ? "Stream Deck connected" : body.error || "Stream Deck not detected", body.connected ? "ok" : "err");
       await renderStreamDeck();
     } catch (err) {
       toast("Reconnect failed: " + err.message, "err");
@@ -678,6 +718,19 @@ if (sdReconnect) {
     }
   });
 }
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  if (tab.dataset.tab !== "streamdeck") return;
+  tab.addEventListener("click", () => {
+    startStreamDeckPoll();
+    autoConnectStreamDeck();
+  });
+});
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  if (tab.dataset.tab === "streamdeck") return;
+  tab.addEventListener("click", () => stopStreamDeckPoll());
+});
 
 document.getElementById("card-animation").addEventListener("change", (e) => {
   setCardAnimation(e.target.value).catch((err) => toast("Error: " + err.message, "err"));

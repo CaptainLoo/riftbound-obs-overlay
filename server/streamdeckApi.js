@@ -22,6 +22,7 @@ function idleStatus(error = null) {
     currentPage: 0,
     pageCount: 0,
     pageNames: [],
+    devicesFound: [],
   };
 }
 
@@ -46,6 +47,7 @@ function spawnWorker() {
   if (worker || workerStarting) return worker;
   if (platform() !== "win32" || !IS_ELECTRON) return null;
 
+  const contentRoot = getContentRoot();
   const script = workerScriptPath();
   if (!existsSync(script)) {
     logStartup("[streamdeck] worker script missing", script);
@@ -55,12 +57,13 @@ function spawnWorker() {
   workerStarting = true;
   const installRoot = getInstallRoot();
   const child = spawn(process.execPath, [script], {
-    cwd: installRoot,
+    cwd: contentRoot,
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
       RIFTBOUND_ELECTRON: "1",
       RIFTBOUND_INSTALL_ROOT: installRoot,
+      RIFTBOUND_CONTENT_ROOT: contentRoot,
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -77,7 +80,7 @@ function spawnWorker() {
 
   worker = child;
   workerStarting = false;
-  logStartup(`[streamdeck] worker spawned (pid ${child.pid})`);
+  logStartup(`[streamdeck] worker spawned (pid ${child.pid}, cwd ${contentRoot})`);
   return child;
 }
 
@@ -100,23 +103,51 @@ export async function stopStreamDeckSafe() {
   workerStarting = false;
 }
 
+export async function waitForStreamDeckStatus(timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+
+  while (Date.now() < deadline) {
+    last = await getStreamDeckStatusSafe();
+    if (last.connected) return last;
+    if (last.error && last.worker) return last;
+    if (last.worker && last.lastScanAt) return last;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
+  return last || idleStatus("Timed out waiting for Stream Deck worker.");
+}
+
+export async function reconnectStreamDeckSafe() {
+  await stopStreamDeckSafe();
+  await new Promise((r) => setTimeout(r, 800));
+  await startStreamDeckSafe();
+  return waitForStreamDeckStatus(15000);
+}
+
 export async function getStreamDeckStatusSafe() {
   const base = idleStatus();
   if (!base.supported) return base;
 
   const fromFile = readStatusFile();
+  const workerAlive = Boolean(worker);
+
   if (fromFile) {
-    return { ...base, ...fromFile, worker: Boolean(worker) };
+    return {
+      ...base,
+      ...fromFile,
+      worker: workerAlive || fromFile.worker === true,
+    };
   }
 
-  if (worker) {
+  if (workerAlive) {
     return { ...base, worker: true, error: "Stream Deck worker starting…" };
   }
 
   return {
     ...base,
     error: null,
-    hint: "Click Reconnect on the Stream Deck tab to connect your device.",
+    hint: "Connecting to Stream Deck…",
   };
 }
 

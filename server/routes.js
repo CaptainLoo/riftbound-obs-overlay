@@ -5,7 +5,7 @@ import { searchByName, cacheCard } from "./riftscribe.js";
 import { parseDecklist, resolveDecklist, resolveTTS } from "./decklist.js";
 import { buildState, broadcastState } from "./hub.js";
 import { DEVICES } from "./streamdeckLayout.js";
-import { getStreamDeckStatusSafe } from "./streamdeckApi.js";
+import { getStreamDeckStatusSafe, reconnectStreamDeckSafe } from "./streamdeckApi.js";
 import {
   applyUpdate,
   checkForUpdate,
@@ -270,17 +270,14 @@ router.get("/streamdeck", async (_req, res) => {
     devices: DEVICES,
     hint: hid.connected
       ? "Stream Deck is controlled directly by Riftbound OBS — no Elgato app required."
-      : "Quit the Elgato Stream Deck app, then click Reconnect on this tab.",
+      : "Quit the Elgato Stream Deck app (system tray + end StreamDeck.exe in Task Manager), then click Reconnect.",
   });
 });
 
 router.post("/streamdeck/reconnect", async (_req, res) => {
   try {
-    const api = await import("./streamdeckApi.js");
-    await api.stopStreamDeckSafe();
-    await new Promise((r) => setTimeout(r, 500));
-    await api.startStreamDeckSafe();
-    res.json({ ok: true, ...(await api.getStreamDeckStatusSafe()) });
+    const status = await reconnectStreamDeckSafe();
+    res.json({ ok: true, ...status });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
