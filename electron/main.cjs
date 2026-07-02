@@ -91,7 +91,7 @@ async function loadStartServer() {
     ? path.join(process.resourcesPath, "riftbound", "server", "index.js")
     : path.join(__dirname, "..", "server", "index.js");
   const mod = await import(`file://${entry.replace(/\\/g, "/")}`);
-  return mod.startServer;
+  return mod;
 }
 
 function buildMenu() {
@@ -242,7 +242,7 @@ function createWindow(port) {
 
 async function boot() {
   logStartup("Loading server…");
-  const startServer = await loadStartServer();
+  const { startServer, registerShutdownForUpdate } = await loadStartServer();
   logStartup("Starting server…");
   try {
     const result = await startServer({ port: PORT, openBrowser: false });
@@ -257,6 +257,13 @@ async function boot() {
       throw err;
     }
   }
+
+  registerShutdownForUpdate(async () => {
+    isQuitting = true;
+    shuttingDown = true;
+    if (closeServer) await closeServer();
+    destroyTray();
+  });
 
   createWindow(PORT);
   setTimeout(() => {

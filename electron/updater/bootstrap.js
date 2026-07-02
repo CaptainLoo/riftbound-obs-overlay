@@ -3,7 +3,7 @@
  * Copies patchable server update scripts to AppData, then runs them detached.
  */
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -13,14 +13,46 @@ const UPDATE_SCRIPTS = [
   "update-apply.js",
   "update-installer.js",
   "update-utils.js",
+  "update-shutdown.js",
+  "update-preflight.js",
   "launcher.js",
   "paths.js",
   "version.js",
 ];
 
-function runnerDir() {
+function updatesDir() {
   const appData = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
-  return join(appData, "RiftboundOBS", "updates", "runner");
+  return join(appData, "RiftboundOBS", "updates");
+}
+
+function runnerDir() {
+  return join(updatesDir(), "runner");
+}
+
+function bootstrapLog(message) {
+  const line = `[${new Date().toISOString()}] [bootstrap] ${message}`;
+  console.log(line);
+  try {
+    mkdirSync(updatesDir(), { recursive: true });
+    appendFileSync(join(updatesDir(), "update.log"), `${line}\n`, "utf8");
+  } catch {
+    /* ignore */
+  }
+}
+
+function writeBootstrapStatus(patch) {
+  try {
+    mkdirSync(updatesDir(), { recursive: true });
+    const path = join(updatesDir(), "apply-status.json");
+    const current = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+    writeFileSync(
+      path,
+      `${JSON.stringify({ ...current, ...patch, at: new Date().toISOString() }, null, 2)}\n`,
+      "utf8"
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
 async function main() {
@@ -35,9 +67,14 @@ async function main() {
   );
   const serverDir = join(installRoot, "resources", "riftbound", "server");
   if (!existsSync(serverDir)) {
-    console.error(`Server folder not found: ${serverDir}`);
+    const msg = `Server folder not found: ${serverDir}`;
+    console.error(msg);
+    writeBootstrapStatus({ phase: "failed", message: msg, error: msg });
     process.exit(1);
   }
+
+  bootstrapLog("Copying update scripts to AppData runner…");
+  writeBootstrapStatus({ phase: "spawned", message: "Bootstrap copying update scripts…", error: null });
 
   const outDir = runnerDir();
   rmSync(outDir, { recursive: true, force: true });
@@ -47,12 +84,15 @@ async function main() {
   for (const name of UPDATE_SCRIPTS) {
     const src = join(serverDir, name);
     if (!existsSync(src)) {
-      console.error(`Missing update script: ${src}`);
+      const msg = `Missing update script: ${src}`;
+      console.error(msg);
+      writeBootstrapStatus({ phase: "failed", message: msg, error: msg });
       process.exit(1);
     }
     cpSync(src, join(outDir, name));
   }
 
+  bootstrapLog("Launching updater router from AppData…");
   const child = spawn(process.execPath, [join(outDir, "update-router.js")], {
     detached: true,
     stdio: "ignore",
@@ -71,5 +111,6 @@ async function main() {
 
 main().catch((err) => {
   console.error(err);
+  writeBootstrapStatus({ phase: "failed", message: err.message, error: err.message });
   process.exit(1);
 });

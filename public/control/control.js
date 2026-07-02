@@ -1181,20 +1181,44 @@ const updateDownloadBtn = document.getElementById("update-download");
 const updateApplyBtn = document.getElementById("update-apply");
 const updateDismissBtn = document.getElementById("update-dismiss");
 const updateCheckBtn = document.getElementById("update-check");
+const updateLogBtn = document.getElementById("update-log");
 const updateProgressWrap = document.getElementById("update-progress-wrap");
 const updateProgressBar = document.getElementById("update-progress-bar");
 const appVersionEl = document.getElementById("app-version");
 
 const UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000;
+const UPDATE_LOG_PATH = "%APPDATA%\\RiftboundOBS\\updates\\update.log";
 let updateState = null;
 let updateDismissedVersion = null;
+let updateDismissedFailureAt = null;
 
 function formatUpdateSize(state) {
+  if (state.installType === "electron" || state.updateMode === "installer") {
+    if (state.installer?.size) {
+      const mb = Math.round(state.installer.size / (1024 * 1024));
+      return `~${mb} MB (full installer)`;
+    }
+    return "~80 MB (full installer)";
+  }
   if (state.updateMode === "installer" && state.installer?.size) {
     const mb = Math.round(state.installer.size / (1024 * 1024));
     return `~${mb} MB (full installer)`;
   }
   return "~1 MB (light patch)";
+}
+
+function formatApplyPhase(phase) {
+  const labels = {
+    validated: "Validated",
+    shutting_down: "Shutting down",
+    spawned: "Starting updater",
+    waiting_app_exit: "Waiting for app to exit",
+    running_installer: "Running installer",
+    restarting: "Restarting",
+    success: "Complete",
+    failed: "Failed",
+  };
+  return labels[phase] || phase || "Working";
 }
 
 function setUpdateProgress(percent) {
@@ -1223,6 +1247,26 @@ function setUpdateUi(state) {
     return;
   }
 
+  if (state.lastApplyFailure && updateDismissedFailureAt !== state.lastApplyFailure.at) {
+    updateBanner.classList.remove("hidden");
+    updateTitle.textContent = "Update failed";
+    updateDetail.textContent =
+      state.lastApplyFailure.message ||
+      state.lastApplyFailure.error ||
+      "The last update attempt failed.";
+    if (updateLogBtn) updateLogBtn.classList.remove("hidden");
+    updateNotes.textContent = `Log: ${state.lastApplyFailure.logPath || UPDATE_LOG_PATH}`;
+    updateNotes.classList.remove("hidden");
+    updateDownloadBtn.disabled = !state.updateAvailable && !state.downloaded?.ready;
+    updateApplyBtn.disabled = !state.downloaded?.ready;
+    if (state.downloaded?.ready) {
+      updateApplyBtn.disabled = false;
+      updateTitle.textContent = `Update v${state.downloaded.version} ready (retry)`;
+      updateDetail.textContent = "Installer downloaded. Click Install & restart to retry.";
+    }
+    return;
+  }
+
   if (state.error && !state.updateAvailable && !state.downloaded?.ready) {
     updateBanner.classList.remove("hidden");
     updateTitle.textContent = "Update check failed";
@@ -1245,8 +1289,13 @@ function setUpdateUi(state) {
   }
 
   updateBanner.classList.remove("hidden");
+  if (updateLogBtn) updateLogBtn.classList.toggle("hidden", !state.logPath);
 
-  if (state.installType === "portable" && state.installer) {
+  if (state.installType === "electron") {
+    updateNotes.textContent =
+      "Electron app updates use the full installer for reliability. User data in %APPDATA%\\RiftboundOBS is preserved.";
+    updateNotes.classList.remove("hidden");
+  } else if (state.installType === "portable" && state.installer) {
     updateNotes.textContent =
       "Tip: the Windows installer is recommended for more reliable updates. Download it from GitHub Releases when convenient.";
     updateNotes.classList.remove("hidden");
@@ -1260,19 +1309,43 @@ function setUpdateUi(state) {
     updateApplyBtn.disabled = false;
     setUpdateProgress(null);
   } else if (state.updateAvailable) {
-    const modeLabel = state.updateMode === "installer" ? "Full update" : "Patch update";
+    const modeLabel =
+      state.updateMode === "installer" || state.installType === "electron"
+        ? "Full installer update"
+        : "Patch update";
     updateTitle.textContent = `${modeLabel}: v${state.latestVersion} available`;
-    updateDetail.textContent = `You are on v${state.currentVersion}. Download size ${formatUpdateSize(state)}.`;
-    updateDownloadBtn.disabled = false;
+    if (state.updateBlockedReason) {
+      updateDetail.textContent = state.updateBlockedReason;
+      updateDownloadBtn.disabled = true;
+    } else {
+      updateDetail.textContent = `You are on v${state.currentVersion}. Download size ${formatUpdateSize(state)}.`;
+      updateDownloadBtn.disabled = false;
+    }
     updateApplyBtn.disabled = true;
     setUpdateProgress(null);
   }
 
-  if (state.notes?.trim() && state.installType !== "portable") {
+  if (state.notes?.trim() && state.installType !== "portable" && state.installType !== "electron") {
     updateNotes.textContent = state.notes.trim();
     updateNotes.classList.remove("hidden");
-  } else if (!state.installType || state.installType !== "portable") {
+  } else if (!state.installType || (state.installType !== "portable" && state.installType !== "electron")) {
     updateNotes.classList.add("hidden");
+  }
+}
+
+async function pollApplyStatusWhileOnline() {
+  for (let i = 0; i < 15; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      const status = await api("/api/update/status");
+      const phase = status.applyStatus?.phase;
+      const msg = status.applyStatus?.message;
+      if (phase && phase !== "validated") {
+        updateDetail.textContent = `${formatApplyPhase(phase)}… ${msg || ""}`.trim();
+      }
+    } catch {
+      return;
+    }
   }
 }
 
@@ -1352,7 +1425,7 @@ function compareSemverClient(a, b) {
 }
 
 async function pollAfterUpdate(expectedVersion) {
-  const maxAttempts = 45;
+  const maxAttempts = 120;
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     try {
@@ -1360,7 +1433,7 @@ async function pollAfterUpdate(expectedVersion) {
       if (!res.ok) continue;
       const info = await res.json();
       if (expectedVersion && compareSemverClient(info.version, expectedVersion) < 0) {
-        updateDetail.textContent = `Restarting… waiting for v${expectedVersion} (${i + 1}/${maxAttempts})`;
+        updateDetail.textContent = `Installing… waiting for v${expectedVersion} (${i + 1}/${maxAttempts})`;
         continue;
       }
       updateDetail.textContent = info.version
@@ -1369,25 +1442,38 @@ async function pollAfterUpdate(expectedVersion) {
       setTimeout(() => location.reload(), 800);
       return;
     } catch {
-      updateDetail.textContent = `Restarting… (${i + 1}/${maxAttempts})`;
+      updateDetail.textContent = `Installing silently… (${i + 1}/${maxAttempts})`;
     }
   }
-  updateDetail.textContent =
-    "Server did not restart. Launch Riftbound OBS manually, or check %APPDATA%\\RiftboundOBS\\updates\\update.log";
+  updateDetail.textContent = `Update did not finish in time. Launch Riftbound OBS manually, or check ${UPDATE_LOG_PATH}`;
+  if (updateLogBtn) updateLogBtn.classList.remove("hidden");
   updateApplyBtn.disabled = false;
 }
 
 updateApplyBtn?.addEventListener("click", async () => {
   if (!confirm("Install the update and restart the app? The control panel will close briefly.")) return;
   updateApplyBtn.disabled = true;
-  updateDetail.textContent = "Installing…";
+  updateDetail.textContent = "Running preflight checks…";
   try {
+    const preflight = await api("/api/update/preflight", {
+      method: "POST",
+      body: { applyToken: updateState?.applyToken },
+    });
+    if (!preflight.ok) {
+      throw new Error(preflight.errors?.join(" ") || "Preflight checks failed.");
+    }
+    if (preflight.warnings?.length) {
+      toast(preflight.warnings.join(" "), "warn");
+    }
     const expectedVersion = updateState?.downloaded?.version || updateState?.latestVersion;
+    updateDetail.textContent = "Installing…";
+    const statusPoll = pollApplyStatusWhileOnline();
     const result = await api("/api/update/apply", {
       method: "POST",
       body: { applyToken: updateState?.applyToken },
     });
-    updateDetail.textContent = "Restarting…";
+    await statusPoll.catch(() => {});
+    updateDetail.textContent = "Installing silently…";
     pollAfterUpdate(result.expectedVersion || expectedVersion);
   } catch (err) {
     toast(err.message, "err");
@@ -1396,8 +1482,26 @@ updateApplyBtn?.addEventListener("click", async () => {
   }
 });
 
+updateLogBtn?.addEventListener("click", async () => {
+  try {
+    const info = await api("/api/update/log");
+    const path = info.logPath || UPDATE_LOG_PATH;
+    await navigator.clipboard.writeText(path);
+    toast(`Log path copied: ${path}`, "ok");
+    if (info.lines?.length) {
+      console.log("[update.log tail]\n" + info.lines.join("\n"));
+    }
+  } catch (err) {
+    toast(`Log: ${UPDATE_LOG_PATH}`, "ok");
+  }
+});
+
 updateDismissBtn?.addEventListener("click", () => {
-  updateDismissedVersion = updateState?.downloaded?.version || updateState?.latestVersion;
+  if (updateState?.lastApplyFailure) {
+    updateDismissedFailureAt = updateState.lastApplyFailure.at;
+  } else {
+    updateDismissedVersion = updateState?.downloaded?.version || updateState?.latestVersion;
+  }
   updateBanner?.classList.add("hidden");
 });
 

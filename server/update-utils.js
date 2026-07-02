@@ -177,3 +177,54 @@ export function isLocalRequest(req) {
     ip.endsWith("127.0.0.1")
   );
 }
+
+export function applyStatusPath() {
+  return join(updatesDir(), "apply-status.json");
+}
+
+export function lastUpdatePath() {
+  return join(updatesDir(), "last-update.json");
+}
+
+export function writeApplyStatus(patch) {
+  mkdirSync(updatesDir(), { recursive: true });
+  const current = readApplyStatus() || {};
+  const next = {
+    ...current,
+    ...patch,
+    at: new Date().toISOString(),
+  };
+  if (patch.error === null) next.error = null;
+  writeFileSync(applyStatusPath(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  if (patch.message || patch.phase) {
+    log(`[status] ${patch.phase || "?"}: ${patch.message || patch.error || ""}`.trim());
+  }
+}
+
+export function readApplyStatus() {
+  if (!existsSync(applyStatusPath())) return null;
+  try {
+    return JSON.parse(readFileSync(applyStatusPath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function readLastUpdate() {
+  if (!existsSync(lastUpdatePath())) return null;
+  try {
+    return JSON.parse(readFileSync(lastUpdatePath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function readUpdateLogTail(maxLines = 80) {
+  if (!existsSync(logPath())) return [];
+  try {
+    const lines = readFileSync(logPath(), "utf8").split(/\r?\n/).filter(Boolean);
+    return lines.slice(-maxLines);
+  } catch {
+    return [];
+  }
+}

@@ -12,6 +12,9 @@ import {
   downloadUpdate,
   getDownloadProgress,
   getLocalVersionInfo,
+  getUpdateLog,
+  getUpdateStatus,
+  preflightUpdate,
 } from "./updater.js";
 import { isLocalRequest } from "./update-utils.js";
 
@@ -534,12 +537,28 @@ router.post("/update/download", async (_req, res) => {
   }
 });
 
-router.post("/update/apply", (req, res) => {
+router.get("/update/status", (_req, res) => {
+  res.json(getUpdateStatus());
+});
+
+router.get("/update/log", (_req, res) => {
+  res.json(getUpdateLog(200));
+});
+
+router.post("/update/preflight", async (req, res) => {
+  try {
+    res.json(await preflightUpdate(req.body?.applyToken));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post("/update/apply", async (req, res) => {
   if (!isLocalRequest(req)) {
     return res.status(403).json({ error: "Apply is only allowed from localhost." });
   }
   try {
-    const result = applyUpdate(req.body?.applyToken);
+    const result = await applyUpdate(req.body?.applyToken);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });

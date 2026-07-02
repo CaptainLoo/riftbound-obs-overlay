@@ -11,20 +11,27 @@ import {
 import { platform } from "node:os";
 import { join } from "node:path";
 import { IS_ELECTRON, IS_INSTALLER, IS_PORTABLE, getInstallRoot } from "./paths.js";
-import { spawnPatchUpdate } from "./launcher.js";
+import { spawnUpdateApply } from "./launcher.js";
+import { runUpdatePreflight } from "./update-preflight.js";
+import { clearAppPid, shutdownForUpdate, sleep } from "./update-shutdown.js";
 import {
   acquireLock,
   clearDownloadProgress,
   clearStaleLock,
   getApplyToken,
   loadApplyTokenFromPending,
+  logPath,
   mintApplyToken,
   pendingPath,
+  readApplyStatus,
   readDownloadProgress,
+  readLastUpdate,
+  readUpdateLogTail,
   releaseLock,
   sha256File,
   updatesDir,
   verifyApplyToken,
+  writeApplyStatus,
   writeDownloadProgress,
 } from "./update-utils.js";
 import { compareSemver, getBundledNodeVersion, getUpdateRepo, getVersion } from "./version.js";
@@ -33,6 +40,9 @@ const GITHUB_HEADERS = {
   Accept: "application/vnd.github+json",
   "User-Agent": "riftbound-obs-updater",
 };
+
+const INSTALLER_CI_MESSAGE =
+  "Full installer not uploaded yet — CI is still building it (usually a few minutes). Download riftbound-setup from GitHub Releases if needed.";
 
 export function isUpdateSupported() {
   return platform() === "win32" && (IS_PORTABLE || IS_INSTALLER || IS_ELECTRON);
@@ -53,6 +63,27 @@ export function getLocalVersionInfo() {
     installType: getInstallType(),
     nodeVersion: getBundledNodeVersion(),
   };
+}
+
+export function getUpdateStatus() {
+  const applyStatus = readApplyStatus();
+  return {
+    applyStatus,
+    logPath: logPath(),
+    logTail: readUpdateLogTail(80),
+    lastUpdate: readLastUpdate(),
+  };
+}
+
+export function getUpdateLog(lines = 200) {
+  return {
+    logPath: logPath(),
+    lines: readUpdateLogTail(lines),
+  };
+}
+
+export async function preflightUpdate(applyTokenFromClient) {
+  return runUpdatePreflight(applyTokenFromClient);
 }
 
 async function fetchJson(url) {
@@ -150,13 +181,18 @@ function nodeMajorMinor(version) {
 
 function nodeRuntimeMismatch(manifestNode, bundledNode) {
   if (!manifestNode || !bundledNode) return false;
-  // Electron patches never replace the embedded runtime — only compare for legacy portable.
   if (IS_ELECTRON) return false;
   return nodeMajorMinor(manifestNode) !== nodeMajorMinor(bundledNode);
 }
 
 function resolveUpdateMode(manifest, currentVersion) {
   if (compareSemver(manifest.version, currentVersion) <= 0) return null;
+
+  if (IS_ELECTRON) {
+    if (manifest.installer?.url || manifest.installer?.file) return "installer";
+    return null;
+  }
+
   if (manifest.forceFull) return "installer";
   const bundledNode = getBundledNodeVersion();
   if (nodeRuntimeMismatch(manifest.nodeVersion, bundledNode)) {
@@ -220,6 +256,19 @@ function getDownloadStatus(currentVersion, latestVersion) {
   }
 }
 
+function getLastApplyFailure() {
+  const status = readApplyStatus();
+  if (!status || status.phase !== "failed") return null;
+  return {
+    phase: status.phase,
+    version: status.version,
+    message: status.message || status.error,
+    error: status.error,
+    at: status.at,
+    logPath: logPath(),
+  };
+}
+
 export async function checkForUpdate() {
   if (!isUpdateSupported()) {
     return {
@@ -241,12 +290,19 @@ export async function checkForUpdate() {
       installType: getInstallType(),
       error: err.message,
       updateAvailable: false,
+      lastApplyFailure: getLastApplyFailure(),
     };
   }
 
   const latestVersion = manifest.version;
   const updateAvailable = compareSemver(latestVersion, currentVersion) > 0;
-  const updateMode = updateAvailable ? resolveUpdateMode(manifest, currentVersion) : null;
+  let updateMode = updateAvailable ? resolveUpdateMode(manifest, currentVersion) : null;
+  let updateBlockedReason = null;
+
+  if (updateAvailable && IS_ELECTRON && !updateMode) {
+    updateBlockedReason = INSTALLER_CI_MESSAGE;
+  }
+
   const downloaded = getDownloadStatus(currentVersion, latestVersion);
   loadApplyTokenFromPending();
 
@@ -256,15 +312,18 @@ export async function checkForUpdate() {
     latestVersion,
     updateAvailable,
     updateMode,
+    updateBlockedReason,
     installType: getInstallType(),
     nodeVersion: getBundledNodeVersion(),
     notes: manifest.notes || "",
-    patch: manifest.patch || null,
+    patch: IS_ELECTRON ? null : manifest.patch || null,
     installer: manifest.installer || null,
     full: manifest.full || null,
     forceFull: Boolean(manifest.forceFull),
     downloaded,
     applyToken: getApplyToken(),
+    lastApplyFailure: getLastApplyFailure(),
+    logPath: logPath(),
   };
 }
 
@@ -341,7 +400,7 @@ export async function downloadUpdate() {
       return { ok: true, message: "Already up to date.", ...status };
     }
     if (!status.updateMode) {
-      throw new Error("No update artifact available in the latest release.");
+      throw new Error(status.updateBlockedReason || "No update artifact available in the latest release.");
     }
 
     if (existingPendingMatches(status)) {
@@ -353,6 +412,7 @@ export async function downloadUpdate() {
         mode: data.mode || "patch",
         ready: true,
         skipped: true,
+        applyToken: getApplyToken(),
       };
     }
 
@@ -365,22 +425,18 @@ export async function downloadUpdate() {
 
     if (status.updateMode === "installer") {
       if (!status.installer?.url) {
-        if (status.patch?.url || status.patch?.file) {
-          status.updateMode = "patch";
-        } else {
-          throw new Error(
-            "Full installer not uploaded yet. Wait a few minutes for CI, or download riftbound-setup from GitHub Releases."
-          );
-        }
+        throw new Error(INSTALLER_CI_MESSAGE);
       }
-    }
-
-    if (status.updateMode === "installer") {
       const dest = join(
         updatesDir(),
         status.installer.file || `riftbound-setup-${status.latestVersion}.exe`
       );
-      writeDownloadProgress({ status: "downloading", mode: "installer", received: 0, total: status.installer.size || 0 });
+      writeDownloadProgress({
+        status: "downloading",
+        mode: "installer",
+        received: 0,
+        total: status.installer.size || 0,
+      });
       sha256 = await downloadArtifact(
         status.installer.url,
         dest,
@@ -395,6 +451,7 @@ export async function downloadUpdate() {
         restart: true,
         installRoot: getInstallRoot().replace(/[\\/]+$/, ""),
         applyToken: token,
+        parentPid: process.pid,
       };
     } else {
       if (!status.patch?.url) throw new Error("No patch asset in the latest release.");
@@ -414,11 +471,18 @@ export async function downloadUpdate() {
         restart: true,
         installRoot: getInstallRoot().replace(/[\\/]+$/, ""),
         applyToken: token,
+        parentPid: process.pid,
       };
     }
 
     writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
-    writeDownloadProgress({ status: "complete", mode: status.updateMode, received: 1, total: 1, percent: 100 });
+    writeDownloadProgress({
+      status: "complete",
+      mode: status.updateMode,
+      received: 1,
+      total: 1,
+      percent: 100,
+    });
 
     return {
       ok: true,
@@ -437,7 +501,7 @@ export function getDownloadProgress() {
   return readDownloadProgress();
 }
 
-export function applyUpdate(applyTokenFromClient) {
+export async function applyUpdate(applyTokenFromClient) {
   if (!isUpdateSupported()) {
     throw new Error("Updates not supported on this platform.");
   }
@@ -449,6 +513,11 @@ export function applyUpdate(applyTokenFromClient) {
   }
   if (!existsSync(pendingPath())) {
     throw new Error("No update downloaded. Download the update first.");
+  }
+
+  const preflight = await runUpdatePreflight(applyTokenFromClient);
+  if (!preflight.ok) {
+    throw new Error(preflight.errors.join(" "));
   }
 
   clearStaleLock();
@@ -467,10 +536,50 @@ export function applyUpdate(applyTokenFromClient) {
     pending.restart = true;
     pending.installRoot = installRoot;
     pending.applyToken = applyTokenFromClient || getApplyToken();
+    pending.parentPid = process.pid;
     writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
 
-    const spawned = spawnPatchUpdate(installRoot, { spawnFn: spawn, isElectron: IS_ELECTRON });
+    writeApplyStatus({
+      phase: "validated",
+      version: pending.version,
+      mode: pending.mode || "installer",
+      message: "Update validated — shutting down app…",
+      error: null,
+    });
+
+    writeApplyStatus({
+      phase: "shutting_down",
+      version: pending.version,
+      mode: pending.mode || "installer",
+      message: "Stopping server and Stream Deck worker…",
+      error: null,
+    });
+
+    await shutdownForUpdate();
+    await sleep(2000);
+    clearAppPid();
+
+    writeApplyStatus({
+      phase: "spawned",
+      version: pending.version,
+      mode: pending.mode || "installer",
+      message: "Launching updater…",
+      error: null,
+    });
+
+    const spawned = spawnUpdateApply(installRoot, {
+      spawnFn: spawn,
+      isElectron: IS_ELECTRON,
+      parentPid: process.pid,
+    });
     if (!spawned.ok) {
+      writeApplyStatus({
+        phase: "failed",
+        version: pending.version,
+        mode: pending.mode || "installer",
+        message: spawned.error,
+        error: spawned.error,
+      });
       throw new Error(spawned.error);
     }
 
@@ -480,10 +589,16 @@ export function applyUpdate(applyTokenFromClient) {
       ok: true,
       message: "Applying update and restarting…",
       expectedVersion: pending.version,
-      mode: pending.mode || "patch",
+      mode: pending.mode || "installer",
+      logPath: logPath(),
     };
   } catch (err) {
     releaseLock();
+    writeApplyStatus({
+      phase: "failed",
+      message: err.message,
+      error: err.message,
+    });
     throw err;
   }
 }

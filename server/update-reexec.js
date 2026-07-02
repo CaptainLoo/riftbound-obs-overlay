@@ -13,6 +13,8 @@ const UPDATE_SCRIPTS = [
   "update-apply.js",
   "update-installer.js",
   "update-utils.js",
+  "update-shutdown.js",
+  "update-preflight.js",
   "launcher.js",
   "paths.js",
   "version.js",

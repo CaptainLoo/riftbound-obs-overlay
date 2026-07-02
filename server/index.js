@@ -8,8 +8,13 @@ import { initDb } from "./db.js";
 import { initHub } from "./hub.js";
 import { router } from "./routes.js";
 import { startStreamDeckSafe, stopStreamDeckSafe } from "./streamdeckApi.js";
+import { clearAppPid, registerShutdownForUpdate, writeAppPid } from "./update-shutdown.js";
+import { readApplyStatus, readLastUpdate } from "./update-utils.js";
+import { compareSemver, getVersion } from "./version.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
+
+export { registerShutdownForUpdate } from "./update-shutdown.js";
 
 export async function startServer(options = {}) {
   const port = Number(options.port) || DEFAULT_PORT;
@@ -23,6 +28,8 @@ export async function startServer(options = {}) {
     logStartup("initDb FAILED", err);
     throw err;
   }
+
+  verifyPostUpdateBoot();
 
   const app = express();
   app.use((req, res, next) => {
@@ -75,12 +82,35 @@ export async function startServer(options = {}) {
 
   const close = async () => {
     await stopStreamDeckSafe();
+    clearAppPid();
     await new Promise((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });
   };
 
+  writeAppPid();
+  registerShutdownForUpdate(async () => {
+    await close();
+  });
+
   return { server, port, close };
+}
+
+function verifyPostUpdateBoot() {
+  const last = readLastUpdate();
+  const status = readApplyStatus();
+  if (status?.phase === "success" && last?.version) {
+    const current = getVersion();
+    if (compareSemver(current, last.version) >= 0) {
+      logStartup(`[update] Verified running v${current} (expected v${last.version})`);
+    } else {
+      logStartup(
+        `[update] WARNING: last update expected v${last.version} but running v${current}`
+      );
+    }
+  } else if (status?.phase === "failed") {
+    logStartup(`[update] Previous update failed: ${status.error || status.message || "unknown"}`);
+  }
 }
 
 const isDirectRun =
