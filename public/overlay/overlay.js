@@ -55,6 +55,7 @@ const SLOT_DEFS = {
 };
 
 const els = {};
+let lastLayout = null;
 
 function applyLayoutCss(layout) {
   if (layoutCssEl) layoutCssEl.textContent = layoutToCss(normalizeLayout(layout));
@@ -97,6 +98,23 @@ function ensureSlot(id, kind) {
     els[id] = { el, span: inner.querySelector(".match-tally-score") };
   } else if (kind === "chrome") {
     els[id] = { el };
+  } else if (id === "p1.pseudo" || id === "p2.pseudo") {
+    el.classList.add("slot-pseudo");
+    const stack = document.createElement("div");
+    stack.className = "pseudo-stack";
+    const barTop = document.createElement("div");
+    barTop.className = "pseudo-bar";
+    barTop.setAttribute("aria-hidden", "true");
+    const span = document.createElement("div");
+    span.className = "slot-text";
+    const barBottom = document.createElement("div");
+    barBottom.className = "pseudo-bar";
+    barBottom.setAttribute("aria-hidden", "true");
+    stack.appendChild(barTop);
+    stack.appendChild(span);
+    stack.appendChild(barBottom);
+    el.appendChild(stack);
+    els[id] = { el, span, barTop, barBottom };
   } else {
     const span = document.createElement("div");
     span.className = "slot-text";
@@ -107,7 +125,24 @@ function ensureSlot(id, kind) {
   return els[id];
 }
 
-function clearCardAnimation(el) {
+function pseudoBarWidthPx(layout) {
+  const unifiedPct = Math.max(layout["p1.pseudo"]?.width ?? 11, layout["p2.pseudo"]?.width ?? 11);
+  const stageW = stage?.offsetWidth || window.innerWidth;
+  return Math.round((unifiedPct / 100) * stageW);
+}
+
+function applyPseudoBarWidths(layout) {
+  const barPx = pseudoBarWidthPx(layout);
+  for (const id of ["p1.pseudo", "p2.pseudo"]) {
+    const slot = els[id];
+    if (!slot?.barTop) continue;
+    slot.barTop.style.width = `${barPx}px`;
+    slot.barBottom.style.width = `${barPx}px`;
+  }
+  document.querySelectorAll(".mp-pseudo-stack .pseudo-bar").forEach((bar) => {
+    bar.style.width = `${barPx}px`;
+  });
+}
   for (const t of ANIM_TYPES) el.classList.remove(`anim-${t}`);
   el.classList.remove("anim-from-left", "anim-from-right");
 }
@@ -136,7 +171,11 @@ function sideHtml(player) {
     : "";
   return `
     <div class="mp-side">
-      <div class="mp-pseudo">${escapeText(player.pseudo || "")}</div>
+      <div class="pseudo-stack mp-pseudo-stack">
+        <div class="pseudo-bar" aria-hidden="true"></div>
+        <div class="mp-pseudo">${escapeText(player.pseudo || "")}</div>
+        <div class="pseudo-bar" aria-hidden="true"></div>
+      </div>
       ${legend}
       ${champion}
       ${battlefields}
@@ -149,6 +188,7 @@ function escapeText(s) {
 
 function renderMatchup(state) {
   matchupEl.innerHTML = `${sideHtml(state.players[0])}<div class="mp-vs">VS</div>${sideHtml(state.players[1])}`;
+  applyPseudoBarWidths(normalizeLayout(state.layout));
 }
 
 function formatLabel(fmt) {
@@ -170,6 +210,7 @@ function render(state) {
   renderScene(state);
 
   const layout = normalizeLayout(state.layout);
+  lastLayout = layout;
   applyLayoutCss(layout);
   applySceneCutout(layout);
 
@@ -229,6 +270,11 @@ function render(state) {
       slot.span.className = `slot-text align-${cfg.align || "left"}`;
     }
   }
+
+  applyPseudoBarWidths(layout);
 }
 
 connectState(render);
+window.addEventListener("resize", () => {
+  if (lastLayout) applyPseudoBarWidths(lastLayout);
+});
