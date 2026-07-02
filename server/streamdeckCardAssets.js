@@ -83,6 +83,17 @@ export async function ensureCardAssets(cardIds, onProgress) {
 
   await runPool(tasks, DOWNLOAD_CONCURRENCY);
 
+  if (repairedIds.length) {
+    try {
+      const { bakeStreamDeckThumb } = await import("./streamdeckImages.js");
+      for (const id of repairedIds) {
+        await bakeStreamDeckThumb(id, db.data.cardsCache).catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   const { ready, total, missing } = countReadyAssets(unique);
   return {
     ready,

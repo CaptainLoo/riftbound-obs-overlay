@@ -1,6 +1,8 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { CARDS_DIR } from "./paths.js";
+
+const SD96_SIZE = 96;
 
 let sharpLib = null;
 
@@ -71,9 +73,48 @@ async function localCardPath(thumbLocal) {
   return existsSync(abs) ? abs : null;
 }
 
+function sd96Path(cardId) {
+  return join(CARDS_DIR, `${cardId}-sd96.rgb`);
+}
+
+function readSd96Art(cardId) {
+  const path = sd96Path(cardId);
+  if (!existsSync(path)) return null;
+  const buf = readFileSync(path);
+  const expected = SD96_SIZE * SD96_SIZE * 3;
+  if (buf.length !== expected) return null;
+  return buf;
+}
+
+/** Pre-bake 96×96 RGB thumb for Stream Deck (call after card download). */
+export async function bakeStreamDeckThumb(cardId, cardsCache) {
+  const meta = cardsCache?.[cardId];
+  const src = await localCardPath(meta?.thumbLocal || meta?.imageLocal);
+  if (!src) return false;
+
+  const sharp = await getSharp();
+  const raw = await sharp(src)
+    .resize(SD96_SIZE, SD96_SIZE, { fit: "cover", position: "centre" })
+    .removeAlpha()
+    .raw({ channels: 3 })
+    .toBuffer();
+  const rgb = assertRgbBuffer(raw, SD96_SIZE, `bake sd96 ${cardId}`);
+  writeFileSync(sd96Path(cardId), rgb);
+  cardArtCache.set(`${SD96_SIZE}:${cardId}`, rgb);
+  return true;
+}
+
 export async function renderCardArtOnly(cardId, cardsCache, size = 96) {
   const cacheKey = `${size}:${cardId}`;
   if (cardArtCache.has(cacheKey)) return cardArtCache.get(cacheKey);
+
+  if (size === SD96_SIZE) {
+    const baked = readSd96Art(cardId);
+    if (baked) {
+      cardArtCache.set(cacheKey, baked);
+      return baked;
+    }
+  }
 
   const meta = cardsCache?.[cardId];
   const src = await localCardPath(meta?.thumbLocal || meta?.imageLocal);
@@ -193,6 +234,12 @@ export function invalidateCardCache(cardId) {
   }
   for (const key of cardCache.keys()) {
     if (key.includes(`:${cardId}:`)) cardCache.delete(key);
+  }
+  try {
+    const path = sd96Path(cardId);
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* ignore */
   }
 }
 

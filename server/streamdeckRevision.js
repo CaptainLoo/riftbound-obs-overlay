@@ -91,3 +91,12 @@ export function findChangedControlKeyIndices(oldPage, newPage) {
   }
   return changed.sort((a, b) => a - b);
 }
+
+/** Stable fingerprint of all mapped keys on a page (for HID packet cache). */
+export function fingerprintPageVisual(page) {
+  if (!page?.keys) return "";
+  const entries = [...page.keys.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([idx, def]) => `${idx}:${keyVisualSignature(def)}`);
+  return stableStringify(entries);
+}

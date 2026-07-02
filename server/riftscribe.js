@@ -102,6 +102,12 @@ export async function cacheCard(cardId) {
 
   db.data.cardsCache[id] = entry;
   await db.write();
+  try {
+    const { bakeStreamDeckThumb } = await import("./streamdeckImages.js");
+    await bakeStreamDeckThumb(id, db.data.cardsCache);
+  } catch (err) {
+    console.warn(`[cache] sd96 bake ${id}: ${err.message}`);
+  }
   return entry;
 }
 

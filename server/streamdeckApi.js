@@ -38,6 +38,10 @@ function idleStatus(error = null) {
     cardsTotal: 0,
     cardsMissing: [],
     refreshMode: null,
+    uploadMode: null,
+    panelRenderMs: null,
+    panelEncodeMs: null,
+    panelUploadMs: null,
     hint: null,
   };
 }

@@ -8,10 +8,20 @@ import {
   countReadyAssets,
   ensureCardAssets,
 } from "./streamdeckCardAssets.js";
-import { warmAdjacentPages } from "./streamdeckImageWarm.js";
+import { warmAdjacentPages, warmAdjacentPanelPages } from "./streamdeckImageWarm.js";
+import { renderPagePanel } from "./streamdeckPanel.js";
+import {
+  clearPanelHidCache,
+  getCachedPanelPrepared,
+  panelCacheKey,
+  preparePanelUpload,
+  setCachedPanelPrepared,
+  uploadPreparedPanel,
+} from "./streamdeckHidCache.js";
 import {
   classifyStreamDeckRefresh,
   findChangedControlKeyIndices,
+  fingerprintPageVisual,
   snapshotRevision,
 } from "./streamdeckRevision.js";
 import { logStartup } from "./startupLog.js";
@@ -20,8 +30,11 @@ const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 const API = `http://127.0.0.1:${DEFAULT_PORT}/api`;
 const KEY_RENDER_TIMEOUT_MS = 8000;
 const KEY_UPLOAD_TIMEOUT_MS = 20000;
+const PANEL_UPLOAD_TIMEOUT_MS = 30000;
 const PROBE_UPLOAD_TIMEOUT_MS = 5000;
 const RENDER_CONCURRENCY = 4;
+const PARTIAL_KEY_THRESHOLD = 6;
+const HID_PACKET_BATCH = 4;
 const CARD_KEY_TYPES = new Set(["showCard", "battlefield"]);
 
 let nodeLib = null;
@@ -76,6 +89,10 @@ let status = {
   cardsTotal: 0,
   cardsMissing: [],
   refreshMode: null,
+  uploadMode: null,
+  panelRenderMs: null,
+  panelEncodeMs: null,
+  panelUploadMs: null,
   hint: null,
 };
 
@@ -187,7 +204,21 @@ async function fillKeyBufferYielding(keyIndex, rgb, options) {
   for (const packet of packets) {
     await hidDevice.sendReports([packet]);
     await yieldToEventLoop();
-    await sleep(1);
+  }
+}
+
+async function sendPreparedPacketsYielding(deck, prepared) {
+  const packets = unwrapPreparedBuffer(deck.MODEL, prepared);
+  const hidDevice = getHidDevice();
+
+  if (!hidDevice?.sendReports) {
+    await deck.sendPreparedBuffer(prepared);
+    return;
+  }
+
+  for (let i = 0; i < packets.length; i += HID_PACKET_BATCH) {
+    await hidDevice.sendReports(packets.slice(i, i + HID_PACKET_BATCH));
+    await yieldToEventLoop();
   }
 }
 
@@ -401,12 +432,23 @@ async function fillKeyWithColorFallback(keyIndex, keyDef) {
 
 function scheduleAdjacentWarm() {
   if (!deck || !pages.length || status.imageUploadOk === false) return;
-  setImmediate(() => {
-    loadImagesMod()
-      .then(({ renderKeyImage }) =>
-        warmAdjacentPages(pages, currentPageIndex, db.data.cardsCache, keySize, renderKeyImage)
-      )
-      .catch((err) => logStartup(`[streamdeck] adjacent warm failed: ${err.message}`));
+  setImmediate(async () => {
+    try {
+      const { renderKeyImage, getIconColorForKeyDef } = await loadImagesMod();
+      await warmAdjacentPages(pages, currentPageIndex, db.data.cardsCache, keySize, renderKeyImage);
+      if (typeof deck.fillPanelBuffer === "function") {
+        await warmAdjacentPanelPages(
+          deck,
+          pages,
+          currentPageIndex,
+          db.data.cardsCache,
+          renderKeyImage,
+          getIconColorForKeyDef
+        );
+      }
+    } catch (err) {
+      logStartup(`[streamdeck] adjacent warm failed: ${err.message}`);
+    }
   });
 }
 
@@ -448,7 +490,7 @@ async function renderKeysBatch(indices, page, generation, { onProgress } = {}) {
   return indices.map((idx) => results.get(idx)).filter(Boolean);
 }
 
-async function drawKeyIndices(keyIndices, generation, { showProgress = true, partial = false } = {}) {
+async function drawKeyIndices(keyIndices, generation, { showProgress = true, partial = false, uploadMode = "keys" } = {}) {
   if (!deck || !pages.length || !keyIndices.length) {
     return { drawn: 0, failed: 0, cancelled: false };
   }
@@ -469,6 +511,7 @@ async function drawKeyIndices(keyIndices, generation, { showProgress = true, par
   if (showProgress && total > 0) {
     setStatus({
       drawProgress: { done: 0, total, failed: 0, phase: "render", partial },
+      uploadMode,
       imagesReady: false,
       imagesDegraded: false,
       hint: null,
@@ -584,6 +627,108 @@ async function drawKeyIndices(keyIndices, generation, { showProgress = true, par
   return { drawn, failed, cancelled: false };
 }
 
+async function drawCurrentPageViaPanel(generation, { showProgress = true } = {}) {
+  if (!deck || !pages.length) return { drawn: 0, failed: 0, cancelled: false };
+  if (status.imageUploadOk === false) {
+    return { drawn: 0, failed: 0, cancelled: false };
+  }
+
+  const page = pages[currentPageIndex];
+  if (!page) return { drawn: 0, failed: 0, cancelled: false };
+
+  const pageIds = collectPageCardIds(page);
+  if (pageIds.length) {
+    const { ready, total } = countReadyAssets(pageIds);
+    if (ready < total) {
+      await prefetchCardAssets(pageIds);
+    }
+  }
+
+  if (generation !== imageDrawGeneration) {
+    return { drawn: 0, failed: 0, cancelled: true };
+  }
+
+  const revision = fingerprintPageVisual(page);
+  const cacheKey = panelCacheKey(currentPageIndex, revision);
+  let prepared = getCachedPanelPrepared(cacheKey);
+
+  const timings = { panelRenderMs: 0, panelEncodeMs: 0, panelUploadMs: 0 };
+
+  if (!prepared) {
+    if (showProgress) {
+      setStatus({
+        drawProgress: { done: 0, total: 1, failed: 0, phase: "render", partial: false },
+        uploadMode: "panel",
+        imagesReady: false,
+        hint: null,
+      });
+    }
+
+    const t0 = Date.now();
+    const { renderKeyImage, getIconColorForKeyDef } = await loadImagesMod();
+    const rgbPanel = await renderPagePanel(
+      deck,
+      page,
+      db.data.cardsCache,
+      renderKeyImage,
+      getIconColorForKeyDef,
+      { concurrency: RENDER_CONCURRENCY }
+    );
+    timings.panelRenderMs = Date.now() - t0;
+
+    if (generation !== imageDrawGeneration) {
+      return { drawn: 0, failed: 0, cancelled: true };
+    }
+
+    const t1 = Date.now();
+    prepared = await preparePanelUpload(deck, rgbPanel);
+    timings.panelEncodeMs = Date.now() - t1;
+    setCachedPanelPrepared(cacheKey, prepared);
+  }
+
+  if (showProgress) {
+    setStatus({
+      drawProgress: { done: 0, total: 1, failed: 0, phase: "upload", partial: false },
+      uploadMode: "panel",
+    });
+  }
+
+  const t2 = Date.now();
+  await withTimeout(
+    sendPreparedPacketsYielding(deck, prepared),
+    PANEL_UPLOAD_TIMEOUT_MS,
+    "Panel upload"
+  );
+  timings.panelUploadMs = Date.now() - t2;
+
+  if (generation !== imageDrawGeneration) {
+    return { drawn: 0, failed: 0, cancelled: true };
+  }
+
+  const buttonCount = deck.CONTROLS.filter((c) => c.type === "button" && c.feedbackType === "lcd").length;
+
+  if (showProgress) {
+    setStatus({
+      drawProgress: null,
+      imagesReady: true,
+      imagesDegraded: status.cardsMissing.length > 0,
+      imagesDrawnCount: buttonCount,
+      uploadMode: "panel",
+      panelRenderMs: timings.panelRenderMs,
+      panelEncodeMs: timings.panelEncodeMs,
+      panelUploadMs: timings.panelUploadMs,
+      hint: buildDrawHint({
+        failed: 0,
+        drawn: buttonCount,
+        imageUploadOk: status.imageUploadOk,
+        cardsMissing: status.cardsMissing,
+      }),
+    });
+  }
+
+  return { drawn: buttonCount, failed: 0, cancelled: false };
+}
+
 async function drawCurrentPageImages(generation) {
   if (!deck || !pages.length) return { drawn: 0, failed: 0, cancelled: false };
   if (status.imageUploadOk === false) {
@@ -621,7 +766,11 @@ async function drawCurrentPageImages(generation) {
       return aCard - bCard;
     });
 
-  return drawKeyIndices(keyIndices, generation, { showProgress: true, partial: false });
+  if (keyIndices.length > PARTIAL_KEY_THRESHOLD && typeof deck.fillPanelBuffer === "function") {
+    return drawCurrentPageViaPanel(generation, { showProgress: true });
+  }
+
+  return drawKeyIndices(keyIndices, generation, { showProgress: true, partial: false, uploadMode: "keys" });
 }
 
 async function drawKeysPartial(keyIndices, { skipProgress = true } = {}) {
@@ -705,6 +854,7 @@ export async function refreshStreamDeck(force = false) {
     if (force) {
       const { clearImageCaches } = await loadImagesMod();
       clearImageCaches();
+      clearPanelHidCache();
     }
 
     pages = buildPages(db.data, deviceKey);
@@ -950,5 +1100,9 @@ export async function stopStreamDeck() {
     cardsMissing: [],
     hint: null,
     refreshMode: null,
+    uploadMode: null,
+    panelRenderMs: null,
+    panelEncodeMs: null,
+    panelUploadMs: null,
   });
 }
