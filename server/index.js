@@ -3,6 +3,7 @@ import { exec } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import express from "express";
 import { PUBLIC_DIR, CARDS_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./paths.js";
+import { logStartup } from "./startupLog.js";
 import { initDb } from "./db.js";
 import { initHub } from "./hub.js";
 import { router } from "./routes.js";
@@ -14,7 +15,14 @@ export async function startServer(options = {}) {
   const port = Number(options.port) || DEFAULT_PORT;
   const openBrowser = options.openBrowser ?? (!IS_ELECTRON && IS_RELEASE && process.platform === "win32");
 
-  await initDb();
+  logStartup("initDb…");
+  try {
+    await initDb();
+    logStartup("initDb OK");
+  } catch (err) {
+    logStartup("initDb FAILED", err);
+    throw err;
+  }
 
   const app = express();
   app.use((req, res, next) => {

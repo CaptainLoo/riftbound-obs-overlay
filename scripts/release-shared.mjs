@@ -64,6 +64,23 @@ start "" "%~dp0Riftbound OBS.exe"
     );
 
     writeFileSync(
+      join(outDir, "Start Riftbound (debug).bat"),
+      `@echo off
+title Riftbound OBS — debug
+cd /d "%~dp0"
+echo Log file: %APPDATA%\\RiftboundOBS\\startup.log
+echo.
+set ELECTRON_ENABLE_LOGGING=1
+"%~dp0Riftbound OBS.exe" --enable-logging
+echo.
+echo Exit code: %ERRORLEVEL%
+echo See log: %APPDATA%\\RiftboundOBS\\startup.log
+pause
+`,
+      "utf8"
+    );
+
+    writeFileSync(
       join(outDir, "Update Riftbound.bat"),
       `@echo off
 title Riftbound OBS — Update

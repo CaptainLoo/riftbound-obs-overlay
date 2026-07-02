@@ -1,5 +1,27 @@
 const { app, BrowserWindow, Menu, Tray, shell, nativeImage, dialog } = require("electron");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
+
+function startupLogPath() {
+  const appData = process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
+  return path.join(appData, "RiftboundOBS", "startup.log");
+}
+
+function logStartup(message, err) {
+  const line = `[${new Date().toISOString()}] ${message}${
+    err ? ` — ${err && (err.stack || err.message || String(err))}` : ""
+  }`;
+  try {
+    fs.mkdirSync(path.dirname(startupLogPath()), { recursive: true });
+    fs.appendFileSync(startupLogPath(), `${line}\n`, "utf8");
+  } catch {
+    /* ignore */
+  }
+  console.error(line);
+}
+
+logStartup("Electron main starting");
 
 process.env.RIFTBOUND_ELECTRON = "1";
 if (!app.isPackaged) {
@@ -19,6 +41,7 @@ let isQuitting = false;
 let shuttingDown = false;
 
 function showStartupError(title, message) {
+  logStartup(`ERROR: ${title}`, message);
   try {
     dialog.showErrorBox(title, message);
   } catch {
@@ -42,8 +65,12 @@ if (!gotLock) {
 }
 
 process.on("uncaughtException", (err) => {
-  console.error("[main] uncaughtException:", err);
+  logStartup("[main] uncaughtException", err);
   showStartupError("Riftbound OBS crashed", err?.message || String(err));
+});
+
+process.on("unhandledRejection", (reason) => {
+  logStartup("[main] unhandledRejection", reason);
 });
 
 async function loadStartServer() {
@@ -175,14 +202,18 @@ function createWindow(port) {
 }
 
 async function boot() {
+  logStartup("Loading server…");
   const startServer = await loadStartServer();
+  logStartup("Starting server…");
   const result = await startServer({ port: PORT, openBrowser: false });
   closeServer = result.close;
+  logStartup(`Server ready on port ${result.port}`);
   createWindow(result.port);
   try {
     createTray();
+    logStartup("Tray created");
   } catch (err) {
-    console.error("[main] Tray failed:", err);
+    logStartup("[main] Tray failed", err);
   }
 }
 
