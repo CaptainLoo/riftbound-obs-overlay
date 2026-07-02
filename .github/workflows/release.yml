@@ -19,13 +19,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Build Stream Deck plugin
-        run: npm run build:streamdeck
-
       - name: Build patch
         run: npm run build:patch
-        env:
-          SKIP_STREAMDECK_BUILD: "1"
 
       - name: Generate update manifest
         run: node scripts/generate-manifest.mjs

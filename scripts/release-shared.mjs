@@ -49,11 +49,6 @@ export function copyAppFiles(outDir) {
   cpSync(join(ROOT, "public"), join(outDir, "public"), { recursive: true });
   cpSync(join(ROOT, "package.json"), join(outDir, "package.json"));
   cpSync(join(ROOT, "package-lock.json"), join(outDir, "package-lock.json"));
-  cpSync(
-    join(ROOT, "streamdeck", "com.riftbound.obs.sdPlugin"),
-    join(outDir, "streamdeck-plugin", "com.riftbound.obs.sdPlugin"),
-    { recursive: true }
-  );
 }
 
 export function writeWindowsBats(outDir, { installMode = "portable" } = {}) {
@@ -85,53 +80,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-`,
-      "utf8"
-    );
-
-    writeFileSync(
-      join(outDir, "Install Stream Deck plugin.bat"),
-      `@echo off
-title Install Riftbound Stream Deck plugin
-set DEST=%APPDATA%\\Elgato\\StreamDeck\\Plugins\\com.riftbound.obs.sdPlugin
-echo Installing to %DEST%
-if exist "%DEST%" rmdir /S /Q "%DEST%"
-xcopy /E /I /Y "%~dp0resources\\riftbound\\streamdeck-plugin\\com.riftbound.obs.sdPlugin" "%DEST%\\"
-if not exist "%DEST%\\manifest.json" (
-  echo.
-  echo ERROR: Plugin install failed.
-  pause
-  exit /b 1
-)
-echo.
-echo OK! Now QUIT Stream Deck completely ^(tray icon - Quit^), then reopen it.
-pause
-`,
-      "utf8"
-    );
-
-    writeFileSync(
-      join(outDir, "Import Stream Deck profile.bat"),
-      `@echo off
-title Import Riftbound Stream Deck profile
-if not "%~1"=="" (set "PROFILE=%~1") else (set "PROFILE=%~dp0Riftbound-OBS.streamDeckProfile")
-if not exist "%PROFILE%" (
-  echo Put Riftbound-OBS.streamDeckProfile in this folder, or drag it onto this script.
-  pause
-  exit /b 1
-)
-echo Quit Stream Deck first ^(tray - Quit^). Press any key...
-pause >nul
-if exist "%APPDATA%\\Elgato\\StreamDeck\\ProfilesV3\\" (set "DEST=%APPDATA%\\Elgato\\StreamDeck\\ProfilesV3") else (set "DEST=%APPDATA%\\Elgato\\StreamDeck\\ProfilesV2")
-set "TMP=%TEMP%\\riftbound-sd-import"
-if exist "%TMP%" rmdir /S /Q "%TMP%"
-mkdir "%TMP%"
-copy /Y "%PROFILE%" "%TMP%\\profile.zip" >nul
-powershell -NoProfile -Command "Expand-Archive -LiteralPath '%TMP%\\profile.zip' -DestinationPath '%TMP%\\extract' -Force"
-xcopy /E /I /Y "%TMP%\\extract\\*" "%DEST%\\"
-rmdir /S /Q "%TMP%"
-echo Done. Restart Stream Deck, select device on the left, profile "Riftbound OBS" at top.
-pause
 `,
       "utf8"
     );
@@ -173,53 +121,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-`,
-    "utf8"
-  );
-
-  writeFileSync(
-    join(outDir, "Install Stream Deck plugin.bat"),
-    `@echo off
-title Install Riftbound Stream Deck plugin
-set DEST=%APPDATA%\\Elgato\\StreamDeck\\Plugins\\com.riftbound.obs.sdPlugin
-echo Installing to %DEST%
-if exist "%DEST%" rmdir /S /Q "%DEST%"
-xcopy /E /I /Y "%~dp0streamdeck-plugin\\com.riftbound.obs.sdPlugin" "%DEST%\\"
-if not exist "%DEST%\\manifest.json" (
-  echo.
-  echo ERROR: Plugin install failed.
-  pause
-  exit /b 1
-)
-echo.
-echo OK! Now QUIT Stream Deck completely ^(tray icon - Quit^), then reopen it.
-pause
-`,
-    "utf8"
-  );
-
-  writeFileSync(
-    join(outDir, "Import Stream Deck profile.bat"),
-    `@echo off
-title Import Riftbound Stream Deck profile
-if not "%~1"=="" (set "PROFILE=%~1") else (set "PROFILE=%~dp0Riftbound-OBS.streamDeckProfile")
-if not exist "%PROFILE%" (
-  echo Put Riftbound-OBS.streamDeckProfile in this folder, or drag it onto this script.
-  pause
-  exit /b 1
-)
-echo Quit Stream Deck first ^(tray - Quit^). Press any key...
-pause >nul
-if exist "%APPDATA%\\Elgato\\StreamDeck\\ProfilesV3\\" (set "DEST=%APPDATA%\\Elgato\\StreamDeck\\ProfilesV3") else (set "DEST=%APPDATA%\\Elgato\\StreamDeck\\ProfilesV2")
-set "TMP=%TEMP%\\riftbound-sd-import"
-if exist "%TMP%" rmdir /S /Q "%TMP%"
-mkdir "%TMP%"
-copy /Y "%PROFILE%" "%TMP%\\profile.zip" >nul
-powershell -NoProfile -Command "Expand-Archive -LiteralPath '%TMP%\\profile.zip' -DestinationPath '%TMP%\\extract' -Force"
-xcopy /E /I /Y "%TMP%\\extract\\*" "%DEST%\\"
-rmdir /S /Q "%TMP%"
-echo Done. Restart Stream Deck, select device on the left, profile "Riftbound OBS" at top.
-pause
 `,
     "utf8"
   );

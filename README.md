@@ -132,7 +132,7 @@ GitHub Actions workflow **Release Installer** (`.github/workflows/release-instal
 2. When an update is available, a banner appears at the top (or click **Check updates**).
 3. Click **Download**, then **Install & restart**.
 4. The panel waits until the new version is detected, then reloads.
-5. Stream Deck plugin is updated automatically on patch updates; restart Stream Deck if keys behave oddly.
+5. Stream Deck keys refresh automatically after patch updates (Windows desktop app only).
 
 If update fails, check `%APPDATA%\RiftboundOBS\updates\update.log` and relaunch **Riftbound OBS**.
 
@@ -228,16 +228,14 @@ The overlay has a transparent background: only the configured elements are shown
 
 ## External control (Stream Deck)
 
-### Ready-to-use setup (recommended)
+### Native Stream Deck (Windows desktop app)
 
-1. Start Riftbound (`npm start`, `npm run dev:electron`, or launch **Riftbound OBS** on Windows).
-2. **Install the plugin once:** `npm run install:streamdeck` — then restart the Stream Deck app.
-3. Control panel → **Stream Deck** tab → choose your device → **Download profile**.
-4. Double-click `Riftbound-OBS.streamDeckProfile` to import.
+1. **Quit the Elgato Stream Deck app** completely (tray icon → Quit) — only one program can use the device.
+2. Launch **Riftbound OBS** on Windows with your Stream Deck plugged in.
+3. Import decks in the control panel — card keys and controls appear automatically.
+4. Control panel → **Stream Deck** tab shows connection status and page info.
 
-The profile is generated from your current decks: every card is a button with its art, plus controls (matchup, hide, win game, game 1/2/3). **Re-download the profile** after changing decks — no URLs to configure.
-
-Supported devices: Stream Deck XL (32 keys, recommended), standard 15-key, Mini 6-key.
+Supported devices: Stream Deck XL (32 keys, recommended), standard 15-key, Mini 6-key. Keys refresh when you change decks or match state.
 
 ### Manual / Companion (advanced)
 

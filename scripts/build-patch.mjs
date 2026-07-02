@@ -25,9 +25,6 @@ console.log(`Building patch v${version}…\n`);
 rmSync(staging, { recursive: true, force: true });
 mkdirSync(staging, { recursive: true });
 
-if (!process.env.SKIP_STREAMDECK_BUILD) {
-  execSync("npm run build:streamdeck", { cwd: ROOT, stdio: "inherit" });
-}
 copyAppFiles(staging);
 writeWindowsBats(staging, { installMode: "electron" });
 

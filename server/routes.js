@@ -4,7 +4,8 @@ import { playerDisplayCards, playerBattlefields, resolveDisplayCard, displayCard
 import { searchByName, cacheCard } from "./riftscribe.js";
 import { parseDecklist, resolveDecklist, resolveTTS } from "./decklist.js";
 import { buildState, broadcastState } from "./hub.js";
-import { DEVICES, streamStreamDeckProfile } from "./streamdeckProfile.js";
+import { DEVICES } from "./streamdeckLayout.js";
+import { getStreamDeckStatus } from "./streamdeckDevice.js";
 import {
   applyUpdate,
   checkForUpdate,
@@ -245,6 +246,7 @@ router.get("/players/:id/cards", (req, res) => {
 });
 
 router.get("/streamdeck", (_req, res) => {
+  const hid = getStreamDeckStatus();
   const showing = db.data.display?.cards || { p1: null, p2: null };
   const match = db.data.match;
   const players = db.data.players.map((p) => {
@@ -254,59 +256,32 @@ router.get("/streamdeck", (_req, res) => {
       ...info,
       showing: showing[p.id] || null,
       battlefields,
-      cards: info.cards.map((c) => ({
-        ...c,
-        hotUrl: `/api/hot/card/${p.id}/${encodeURIComponent(c.id)}`,
-        hotIndexUrl: `/api/hot/card/${p.id}/index/${c.index}`,
-      })),
+      cardCount: info.cards.length,
     };
   });
   res.json({
+    ...hid,
     players,
     showing,
     match: {
       currentGame: match.currentGame,
       currentScore: match.games[match.currentGame]?.score || { p1: 0, p2: 0 },
-      games: match.games.map((g) => ({
-        battlefield: g.battlefield,
-        champion: g.champion,
-        score: g.score,
-      })),
     },
     devices: DEVICES,
-    profileUrl: "/api/streamdeck/profile",
-    plugin: {
-      name: "Riftbound OBS",
-      uuid: "com.riftbound.obs",
-      installHint: "Run npm run install:streamdeck from the app folder",
-    },
-    hotActions: {
-      matchup: "/api/hot/matchup",
-      clear: "/api/hot/clear",
-      clearP1: "/api/hot/clear/p1",
-      clearP2: "/api/hot/clear/p2",
-      winP1: "/api/hot/win/p1",
-      winP2: "/api/hot/win/p2",
-      scoreP1Inc: "/api/hot/score/p1/inc",
-      scoreP1Dec: "/api/hot/score/p1/dec",
-      scoreP2Inc: "/api/hot/score/p2/inc",
-      scoreP2Dec: "/api/hot/score/p2/dec",
-    },
+    hint: hid.connected
+      ? "Stream Deck is controlled directly by Riftbound OBS — no Elgato app required."
+      : "Quit the Elgato Stream Deck app if it is running, then restart Riftbound OBS.",
   });
 });
 
-router.get("/streamdeck/profile", async (req, res) => {
-  const device = String(req.query.device || "xl");
-  if (!DEVICES[device]) {
-    return res.status(400).json({ error: "invalid device", allowed: Object.keys(DEVICES) });
-  }
-  res.setHeader("Content-Type", "application/octet-stream");
-  res.setHeader("Content-Disposition", 'attachment; filename="Riftbound-OBS.streamDeckProfile"');
+router.post("/streamdeck/reconnect", async (_req, res) => {
   try {
-    await streamStreamDeckProfile(db.data, device, res);
+    const mod = await import("./streamdeckDevice.js");
+    await mod.stopStreamDeck();
+    await mod.startStreamDeck();
+    res.json({ ok: true, ...mod.getStreamDeckStatus() });
   } catch (err) {
-    console.error("[streamdeck profile]", err);
-    if (!res.headersSent) res.status(500).json({ error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

@@ -12,11 +12,7 @@ const version = getVersion();
 
 console.log(`Building Electron Windows release v${version}…\n`);
 
-if (!process.env.SKIP_STREAMDECK_BUILD) {
-  prepareElectronResources();
-} else {
-  prepareElectronResources({ skipStreamDeck: true });
-}
+prepareElectronResources();
 
 const winUnpacked = join(ROOT, "dist", "electron", "win-unpacked");
 mkdirSync(join(ROOT, "dist", "electron"), { recursive: true });

@@ -1,5 +1,4 @@
 node_modules/
-streamdeck/node_modules/
 data/db.json
 data/cards/
 dist/

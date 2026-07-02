@@ -98,49 +98,20 @@
       <!-- ============ STREAM DECK ============ -->
       <section id="tab-streamdeck" class="panel">
         <div class="card-block sd-setup">
-          <h2>Stream Deck — ready to use</h2>
+          <h2>Stream Deck</h2>
           <p class="hint sd-intro">
-            Install the plugin once, then download a profile generated from your current decks.
-            Every card becomes a button with its art — no URLs to copy. Re-download after deck changes.
+            Riftbound OBS controls your Stream Deck directly — no Elgato app or profile import.
+            Plug in your device, launch <strong>Riftbound OBS</strong> on Windows, and keys sync
+            automatically from your imported decks.
           </p>
 
-          <ol class="sd-steps">
-            <li>
-              <strong>Install the plugin first</strong> — Windows: double-click
-              <code class="sd-cmd">Install Stream Deck plugin.bat</code>
-              in the app folder. Then <strong>quit and reopen</strong> Stream Deck completely.
-            </li>
-            <li>
-              <strong>Verify the plugin</strong> — drag any action onto a key. You must see a
-              <strong>Riftbound OBS</strong> category (Show Card, Matchup…). If missing, fix step 1 before importing.
-            </li>
-            <li>
-              <strong>Download the profile</strong> — pick the device that matches <em>your</em> hardware
-              (15-key classic = Standard, not XL). Click Download profile.
-            </li>
-            <li>
-              <strong>Import</strong> — double-click the file, click Install. Then in Stream Deck:
-              select your device on the <strong>left</strong>, open the <strong>profile dropdown at the top</strong>,
-              choose <strong>Riftbound OBS</strong>. Or: Settings → Profiles → look for Riftbound OBS.
-            </li>
-          </ol>
-
-          <p class="hint sd-warn">
-            Yellow triangle on a key? The Riftbound app is not running — launch
-            <strong>Riftbound OBS</strong> and keep it open while streaming.
-            Reinstall the plugin after updating the app zip.
-          </p>
-
-          <div class="sd-download-row">
-            <span class="inline-lbl">Device</span>
-            <select id="sd-device" style="width: auto">
-              <option value="xl">Stream Deck XL — 32 keys (8×4)</option>
-              <option value="standard">Stream Deck — 15 keys (5×3)</option>
-              <option value="mini">Stream Deck Mini — 6 keys</option>
-            </select>
-            <button type="button" class="btn" id="sd-download-profile">Download profile</button>
+          <div class="sd-status-row">
+            <span class="sd-status-badge" id="sd-hid-status">Checking…</span>
+            <button type="button" class="btn" id="sd-reconnect">Reconnect</button>
           </div>
 
+          <p class="hint" id="sd-hid-detail"></p>
+          <p class="hint sd-warn" id="sd-hid-hint"></p>
           <p class="hint" id="sd-deck-status"></p>
 
           <h3>What's included</h3>
@@ -150,6 +121,11 @@
             <li>One page per player — every deck card as a button (with card image)</li>
             <li>Extra pages if the deck has more cards than your device grid</li>
           </ul>
+
+          <p class="hint sd-warn">
+            <strong>Important:</strong> quit the Elgato Stream Deck app completely (tray icon → Quit)
+            before launching Riftbound OBS. Only one program can use the device at a time.
+          </p>
         </div>
       </section>
 

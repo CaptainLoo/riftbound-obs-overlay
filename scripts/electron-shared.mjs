@@ -4,22 +4,26 @@
  *   dist/electron-staging/riftbound/
  */
 import { execSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT, copyAppFiles } from "./release-shared.mjs";
 
 export const ELECTRON_STAGING = join(ROOT, "dist", "electron-staging", "riftbound");
 
-export function prepareElectronResources({ skipStreamDeck = false } = {}) {
+export function prepareElectronResources() {
   rmSync(ELECTRON_STAGING, { recursive: true, force: true });
   mkdirSync(ELECTRON_STAGING, { recursive: true });
 
-  if (!skipStreamDeck) {
-    execSync("npm run build:streamdeck", { cwd: ROOT, stdio: "inherit" });
-  }
-
   copyAppFiles(ELECTRON_STAGING);
   execSync("npm ci --omit=dev", { cwd: ELECTRON_STAGING, stdio: "inherit" });
+
+  const electronVer = JSON.parse(
+    readFileSync(join(ROOT, "node_modules", "electron", "package.json"), "utf8")
+  ).version;
+  execSync(
+    `npx electron-rebuild --project "${ELECTRON_STAGING}" --force --only sharp,node-hid --version ${electronVer}`,
+    { cwd: ROOT, stdio: "inherit" }
+  );
 
   return ELECTRON_STAGING;
 }

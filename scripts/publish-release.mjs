@@ -32,14 +32,10 @@ if (!repo || repo.includes("REPLACE")) {
   process.exit(1);
 }
 
-console.log("Building Stream Deck plugin…");
-execSync("npm run build:streamdeck", { cwd: ROOT, stdio: "inherit" });
-
 console.log("\nBuilding patch…");
 execSync("npm run build:patch", {
   cwd: ROOT,
   stdio: "inherit",
-  env: { ...process.env, SKIP_STREAMDECK_BUILD: "1" },
 });
 
 console.log("\nBuilding full Windows release…");
@@ -47,7 +43,6 @@ if (process.platform === "win32") {
   execSync("npm run build:win", {
     cwd: ROOT,
     stdio: "inherit",
-    env: { ...process.env, SKIP_STREAMDECK_BUILD: "1" },
   });
 } else {
   console.log("Skipping full Windows Electron build on non-Windows host — CI builds after tag push.\n");

@@ -594,46 +594,87 @@ function renderDisplay() {
 document.getElementById("hide-card").addEventListener("click", hideDisplay);
 document.getElementById("show-matchup").addEventListener("click", toggleMatchup);
 
-// ---- Stream Deck setup ----------------------------------------------------
+// ---- Stream Deck (native HID) ---------------------------------------------
 
-function renderStreamDeck() {
-  const status = document.getElementById("sd-deck-status");
-  if (!status || !data) return;
-  const counts = ["p1", "p2"].map((id) => {
-    const p = player(id);
-    const n = p.displayCards?.length ?? 0;
-    return `${playerName(id)}: ${n} cards`;
-  });
-  status.textContent = `Profile will include — ${counts.join(" · ")}. Re-download after importing new decks.`;
+async function renderStreamDeck() {
+  const badge = document.getElementById("sd-hid-status");
+  const detail = document.getElementById("sd-hid-detail");
+  const hint = document.getElementById("sd-hid-hint");
+  const deckStatus = document.getElementById("sd-deck-status");
+  if (!badge) return;
+
+  try {
+    const res = await fetch("/api/streamdeck");
+    const info = await res.json();
+
+    if (!info.supported) {
+      badge.textContent = "Windows desktop app only";
+      badge.className = "sd-status-badge sd-status-warn";
+      detail.textContent =
+        "Native Stream Deck control runs inside Riftbound OBS on Windows. Use the HTTP hot URLs on macOS or in dev mode.";
+      if (hint) hint.textContent = "";
+    } else if (info.connected) {
+      badge.textContent = `Connected — ${info.productName || "Stream Deck"}`;
+      badge.className = "sd-status-badge sd-status-ok";
+      const parts = [];
+      if (info.pageCount) {
+        parts.push(`Page ${(info.currentPage ?? 0) + 1} / ${info.pageCount}`);
+      }
+      if (info.pageNames?.length) {
+        const name = info.pageNames[info.currentPage ?? 0];
+        if (name) parts.push(name);
+      }
+      if (info.firmwareVersion) parts.push(`FW ${info.firmwareVersion}`);
+      detail.textContent = parts.join(" · ");
+      if (hint) hint.textContent = info.hint || "";
+    } else if (info.error) {
+      badge.textContent = "Error";
+      badge.className = "sd-status-badge sd-status-err";
+      detail.textContent = info.error;
+      if (hint) {
+        hint.textContent =
+          info.hint || "Quit the Elgato Stream Deck app completely, then click Reconnect.";
+      }
+    } else {
+      badge.textContent = "Not detected";
+      badge.className = "sd-status-badge sd-status-warn";
+      detail.textContent = "Plug in your Stream Deck and keep Riftbound OBS running.";
+      if (hint) hint.textContent = info.hint || "";
+    }
+
+    if (deckStatus && data) {
+      const counts = ["p1", "p2"].map((id) => {
+        const p = player(id);
+        const n = p.displayCards?.length ?? 0;
+        return `${playerName(id)}: ${n} cards`;
+      });
+      deckStatus.textContent = `Deck keys — ${counts.join(" · ")}. Keys refresh automatically after deck changes.`;
+    }
+  } catch (err) {
+    badge.textContent = "Unavailable";
+    badge.className = "sd-status-badge sd-status-err";
+    if (detail) detail.textContent = err.message;
+  }
 }
 
-const sdDevice = document.getElementById("sd-device");
-const sdDownload = document.getElementById("sd-download-profile");
-if (sdDevice && sdDownload) {
-  sdDownload.addEventListener("click", async () => {
-    const device = sdDevice.value || "xl";
-    sdDownload.disabled = true;
-    const prev = sdDownload.textContent;
-    sdDownload.textContent = "Generating…";
+const sdReconnect = document.getElementById("sd-reconnect");
+if (sdReconnect) {
+  sdReconnect.addEventListener("click", async () => {
+    sdReconnect.disabled = true;
+    const prev = sdReconnect.textContent;
+    sdReconnect.textContent = "Reconnecting…";
     try {
-      const res = await fetch(`/api/streamdeck/profile?device=${encodeURIComponent(device)}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.error || res.statusText || "Download failed");
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "Riftbound-OBS.streamDeckProfile";
-      a.click();
-      URL.revokeObjectURL(url);
-      toast("Profile downloaded");
+      const res = await fetch("/api/streamdeck/reconnect", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || res.statusText || "Reconnect failed");
+      toast(body.connected ? "Stream Deck connected" : "Stream Deck not detected");
+      await renderStreamDeck();
     } catch (err) {
-      toast("Profile error: " + err.message, "err");
+      toast("Reconnect failed: " + err.message, "err");
+      await renderStreamDeck();
     } finally {
-      sdDownload.disabled = false;
-      sdDownload.textContent = prev;
+      sdReconnect.disabled = false;
+      sdReconnect.textContent = prev;
     }
   });
 }
@@ -1098,7 +1139,7 @@ function setUpdateUi(state) {
   if (state.downloaded?.ready) {
     const modeLabel = state.downloaded.mode === "installer" ? "full installer" : "patch";
     updateTitle.textContent = `Update v${state.downloaded.version} ready`;
-    updateDetail.textContent = `${modeLabel} downloaded. Click Install & restart. Stream Deck plugin updates automatically for patches.`;
+    updateDetail.textContent = `${modeLabel} downloaded. Click Install & restart.`;
     updateDownloadBtn.disabled = true;
     updateApplyBtn.disabled = false;
     setUpdateProgress(null);

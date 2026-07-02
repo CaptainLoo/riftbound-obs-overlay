@@ -664,12 +664,37 @@ select:focus {
   font-size: 12px;
 }
 
-.sd-download-row {
+.sd-status-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin: 20px 0 8px;
+  gap: 12px;
+  margin: 16px 0 10px;
+}
+
+.sd-status-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: #0a0d12;
+}
+
+.sd-status-ok {
+  color: #6ee7a8;
+  border-color: #1f4d38;
+}
+
+.sd-status-warn {
+  color: #e8b84a;
+  border-color: #5a4a1a;
+}
+
+.sd-status-err {
+  color: #f87171;
+  border-color: #5a2020;
 }
 
 .sd-list {

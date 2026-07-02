@@ -11,7 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, platform } from "node:os";
+import { platform } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnAppLauncher, resolvePatchTargetRoot } from "./launcher.js";
@@ -46,19 +46,6 @@ function expandZip(zipPath, destDir) {
   );
 }
 
-function installStreamDeckPlugin(installRootDir) {
-  const src = join(installRootDir, "streamdeck-plugin", "com.riftbound.obs.sdPlugin");
-  if (!existsSync(src)) {
-    log("No streamdeck-plugin in patch — skipping.");
-    return;
-  }
-  const appData = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
-  const dest = join(appData, "Elgato", "StreamDeck", "Plugins", "com.riftbound.obs.sdPlugin");
-  rmSync(dest, { recursive: true, force: true });
-  cpSync(src, dest, { recursive: true });
-  log(`Stream Deck plugin installed → ${dest}`);
-}
-
 function runNpmCi(nodeRoot, workDir) {
   const nodeExe = join(nodeRoot, "node", "node.exe");
   if (!existsSync(nodeExe)) {
@@ -75,7 +62,6 @@ function runNpmCi(nodeRoot, workDir) {
     stdio: "inherit",
     shell: true,
   });
-}
 }
 
 async function renameWithRetry(from, to, attempts = 8) {
@@ -139,7 +125,7 @@ function prepareStaging(extractDir, installRoot) {
   rmSync(stagingRoot, { recursive: true, force: true });
   mkdirSync(stagingRoot, { recursive: true });
 
-  for (const name of ["server", "public", "streamdeck-plugin"]) {
+  for (const name of ["server", "public"]) {
     const src = join(extractDir, name);
     if (existsSync(src)) cpSync(src, join(stagingRoot, name), { recursive: true });
   }
@@ -147,12 +133,7 @@ function prepareStaging(extractDir, installRoot) {
     const src = join(extractDir, name);
     if (existsSync(src)) cpSync(src, join(stagingRoot, name));
   }
-  for (const bat of [
-    "Start Riftbound.bat",
-    "Update Riftbound.bat",
-    "Install Stream Deck plugin.bat",
-    "Import Stream Deck profile.bat",
-  ]) {
+  for (const bat of ["Start Riftbound.bat", "Update Riftbound.bat"]) {
     const src = join(extractDir, bat);
     if (existsSync(src)) cpSync(src, join(stagingRoot, bat));
   }
@@ -165,18 +146,13 @@ async function applyStaging(stagingRoot, installRoot, contentRoot) {
   mkdirSync(backupRoot, { recursive: true });
 
   try {
-    for (const name of ["server", "public", "streamdeck-plugin"]) {
+    for (const name of ["server", "public"]) {
       await swapPath(join(stagingRoot, name), join(contentRoot, name), backupRoot);
     }
     for (const name of ["package.json", "package-lock.json"]) {
       await swapFile(join(stagingRoot, name), join(contentRoot, name), backupRoot);
     }
-    for (const bat of [
-      "Start Riftbound.bat",
-      "Update Riftbound.bat",
-      "Install Stream Deck plugin.bat",
-      "Import Stream Deck profile.bat",
-    ]) {
+    for (const bat of ["Start Riftbound.bat", "Update Riftbound.bat"]) {
       await swapFile(join(stagingRoot, bat), join(installRoot, bat), backupRoot);
     }
   } finally {
@@ -262,8 +238,6 @@ export async function runPatchApply() {
         log("Dependencies changed — skip npm ci (Electron install, use full installer if needed).");
       }
     }
-
-    installStreamDeckPlugin(contentRoot);
 
     rmSync(pendingPath(), { force: true });
     rmSync(extractDir, { recursive: true, force: true });

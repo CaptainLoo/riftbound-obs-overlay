@@ -6,6 +6,7 @@ import { PUBLIC_DIR, CARDS_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./path
 import { initDb } from "./db.js";
 import { initHub } from "./hub.js";
 import { router } from "./routes.js";
+import { startStreamDeck, stopStreamDeck } from "./streamdeckDevice.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 
@@ -45,15 +46,20 @@ export async function startServer(options = {}) {
   console.log(`  Overlay (Browser Source) : http://localhost:${port}/overlay`);
   console.log(`  Control panel            : http://localhost:${port}/control`);
   if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
+  if (IS_ELECTRON && process.platform === "win32") {
+    startStreamDeck().catch((err) => console.error("[streamdeck]", err));
+  }
 
   if (openBrowser) {
     exec(`start http://localhost:${port}/control`);
   }
 
-  const close = () =>
-    new Promise((resolve, reject) => {
+  const close = async () => {
+    await stopStreamDeck();
+    await new Promise((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });
+  };
 
   return { server, port, close };
 }
