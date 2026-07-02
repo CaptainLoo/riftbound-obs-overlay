@@ -28,6 +28,14 @@ export type BattlefieldSettings = {
   port?: number;
 };
 
+export type GamePointSettings = {
+  player?: "p1" | "p2";
+  /** +1 or -1 */
+  delta?: number;
+  host?: string;
+  port?: number;
+};
+
 export function apiBase(settings: { host?: string; port?: number }) {
   const host = settings.host?.trim() || "127.0.0.1";
   const port = Number(settings.port) || 7474;
@@ -129,6 +137,14 @@ export async function setBattlefield(settings: BattlefieldSettings) {
   const cardId = settings.cardId;
   if (!cardId) throw new Error("No battlefield configured on this key");
   return apiGet(`/api/hot/battlefield/${player}/${encodeURIComponent(cardId)}`, settings);
+}
+
+export async function adjustGamePoint(settings: GamePointSettings) {
+  const player = settings.player || "p1";
+  const delta = Number(settings.delta);
+  if (delta !== 1 && delta !== -1) throw new Error("Invalid point delta");
+  const op = delta > 0 ? "inc" : "dec";
+  return apiGet(`/api/hot/score/${player}/${op}`, settings);
 }
 
 export async function fetchDeckProfile(settings: { host?: string; port?: number }) {

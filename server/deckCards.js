@@ -1,9 +1,12 @@
-/** Cards available for on-demand overlay display (same groups as the control panel). */
+/** Cards available for on-demand overlay display (Stream Deck + control panel). */
 
 export function displayCardEntries(deck, cardsCache = {}) {
   const entries = [];
+  const seen = new Set();
+
   const add = (group, id, quantity = 1) => {
-    if (!id) return;
+    if (!id || seen.has(id)) return;
+    seen.add(id);
     const name = cardsCache[id]?.name || id;
     const label = quantity > 1 ? `${name} ×${quantity}` : name;
     entries.push({ index: entries.length, id, name, group, quantity, label });
@@ -12,8 +15,6 @@ export function displayCardEntries(deck, cardsCache = {}) {
   if (deck.legend) add("Legend", deck.legend);
   for (const id of deck.champions || []) add("Champion", id);
   for (const e of deck.maindeck || []) add("Main deck", e.id, Number(e.quantity) || 1);
-  for (const e of deck.battlefields || []) add("Battlefields", e.id, Number(e.quantity) || 1);
-  for (const e of deck.runes || []) add("Runes", e.id, Number(e.quantity) || 1);
   for (const e of deck.sideboard || []) add("Side deck", e.id, Number(e.quantity) || 1);
 
   return entries;

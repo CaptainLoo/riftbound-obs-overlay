@@ -13,11 +13,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, platform } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const installRoot = process.argv[2] ? process.argv[2].replace(/\\$/, "") : process.cwd();
+function normalizePath(p) {
+  if (!p || typeof p !== "string") return process.cwd();
+  return p.replace(/^["']+|["']+$/g, "").replace(/[\\/]+$/, "");
+}
 
 function updatesDir() {
   if (platform() === "win32") {
@@ -94,6 +95,12 @@ async function main() {
   }
 
   const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
+  const installRoot = normalizePath(pending.installRoot || process.cwd());
+  if (!existsSync(installRoot)) {
+    console.error("Install folder not found:", installRoot);
+    process.exit(1);
+  }
+
   const zipPath = pending.patchZip;
   if (!existsSync(zipPath)) {
     console.error("Patch zip not found:", zipPath);

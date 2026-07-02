@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
 import { DATA_DIR, IS_PORTABLE, ROOT_DIR } from "./paths.js";
@@ -90,11 +97,35 @@ async function fetchLatestManifest() {
   return manifest;
 }
 
-function getDownloadStatus() {
+function cleanupStalePending(currentVersion) {
+  const pending = pendingPath();
+  if (!existsSync(pending)) return;
+  try {
+    const data = JSON.parse(readFileSync(pending, "utf8"));
+    if (!data.version || compareSemver(data.version, currentVersion) <= 0) {
+      if (data.patchZip && existsSync(data.patchZip)) {
+        unlinkSync(data.patchZip);
+      }
+      unlinkSync(pending);
+    }
+  } catch {
+    try {
+      unlinkSync(pending);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function getDownloadStatus(currentVersion) {
+  cleanupStalePending(currentVersion);
   const pending = pendingPath();
   if (!existsSync(pending)) return null;
   try {
     const data = JSON.parse(readFileSync(pending, "utf8"));
+    if (!data.version || compareSemver(data.version, currentVersion) <= 0) {
+      return null;
+    }
     return {
       version: data.version,
       ready: existsSync(data.patchZip),
@@ -138,7 +169,7 @@ export async function checkForUpdate() {
     notes: manifest.notes || "",
     patch: manifest.patch || null,
     full: manifest.full || null,
-    downloaded: getDownloadStatus(),
+    downloaded: getDownloadStatus(currentVersion),
   };
 }
 
@@ -198,7 +229,7 @@ export async function downloadUpdate() {
         patchZip: zipPath,
         sha256,
         restart: true,
-        installRoot: ROOT_DIR,
+        installRoot: ROOT_DIR.replace(/[\\/]+$/, ""),
       },
       null,
       2
@@ -224,8 +255,15 @@ export function applyUpdate() {
   }
 
   const pending = JSON.parse(readFileSync(pendingPath(), "utf8"));
+  const currentVersion = getVersion();
+  if (!pending.version || compareSemver(pending.version, currentVersion) <= 0) {
+    cleanupStalePending(currentVersion);
+    throw new Error(
+      `Downloaded update v${pending.version || "?"} is not newer than v${currentVersion}.`
+    );
+  }
   pending.restart = true;
-  pending.installRoot = ROOT_DIR;
+  pending.installRoot = ROOT_DIR.replace(/[\\/]+$/, "");
   writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
 
   const updateBat = join(ROOT_DIR, "Update Riftbound.bat");

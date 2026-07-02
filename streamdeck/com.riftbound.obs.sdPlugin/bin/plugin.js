@@ -6480,6 +6480,13 @@ async function setBattlefield(settings3) {
   if (!cardId) throw new Error("No battlefield configured on this key");
   return apiGet(`/api/hot/battlefield/${player}/${encodeURIComponent(cardId)}`, settings3);
 }
+async function adjustGamePoint(settings3) {
+  const player = settings3.player || "p1";
+  const delta = Number(settings3.delta);
+  if (delta !== 1 && delta !== -1) throw new Error("Invalid point delta");
+  const op = delta > 0 ? "inc" : "dec";
+  return apiGet(`/api/hot/score/${player}/${op}`, settings3);
+}
 async function fetchDeckProfile(settings3) {
   return apiGet("/api/streamdeck", settings3);
 }
@@ -6690,6 +6697,41 @@ SetBattlefield = __decorateClass([
   action({ UUID: "com.riftbound.obs.battlefield" })
 ], SetBattlefield);
 
+// src/actions/GamePoint.ts
+var GamePoint = class extends SingletonAction {
+  async onWillAppear(ev) {
+    if (!ev.action.isKey()) return;
+    await this.syncKey(ev.payload.settings, ev.action);
+  }
+  async onDidReceiveSettings(ev) {
+    if (!ev.action.isKey()) return;
+    await this.syncKey(ev.payload.settings, ev.action);
+  }
+  async onKeyDown(ev) {
+    await runKeyAction(ev, async () => {
+      await adjustGamePoint(ev.payload.settings);
+      await this.syncKey(ev.payload.settings, ev.action);
+    });
+  }
+  async syncKey(settings3, action2) {
+    const player = settings3.player || "p1";
+    const delta = Number(settings3.delta) || 1;
+    const sign = delta > 0 ? "+" : "\u2212";
+    const label = player === "p2" ? "P2" : "P1";
+    let title = `${label} ${sign}${Math.abs(delta)}`;
+    try {
+      const profile = await fetchDeckProfile(settings3);
+      const pts = profile.match?.currentScore?.[player];
+      if (typeof pts === "number") title = `${label} ${sign} (${pts})`;
+    } catch {
+    }
+    await action2.setTitle(title, { state: 0 });
+  }
+};
+GamePoint = __decorateClass([
+  action({ UUID: "com.riftbound.obs.gamepoint" })
+], GamePoint);
+
 // src/plugin.ts
 streamDeck.actions.registerAction(new ShowCard());
 streamDeck.actions.registerAction(new HideAll());
@@ -6698,6 +6740,7 @@ streamDeck.actions.registerAction(new Matchup());
 streamDeck.actions.registerAction(new WinGame());
 streamDeck.actions.registerAction(new SelectGame());
 streamDeck.actions.registerAction(new SetBattlefield());
+streamDeck.actions.registerAction(new GamePoint());
 streamDeck.connect();
 /*! Bundled license information:
 

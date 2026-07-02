@@ -82,6 +82,14 @@
       "Tooltip": "Set this player's battlefield for the current game.",
       "Controllers": ["Keypad"],
       "States": [{ "Image": "imgs/action-game", "TitleAlignment": "bottom", "FontSize": 10 }]
+    },
+    {
+      "Name": "Game Point",
+      "UUID": "com.riftbound.obs.gamepoint",
+      "Icon": "imgs/action-win",
+      "Tooltip": "Add or remove a point for the current game.",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/action-win", "TitleAlignment": "bottom", "FontSize": 10 }]
     }
   ]
 }

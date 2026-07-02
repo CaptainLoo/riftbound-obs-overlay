@@ -532,20 +532,23 @@ function renderDisplay() {
     block.className = "field";
 
     const current = data.display?.cards?.[id] || "";
-    const groups = [
-      ["Legend", p.deck.legend ? [p.deck.legend] : []],
-      ["Champion", p.deck.champions || []],
-      ["Main deck", p.deck.maindeck.map((e) => e.id)],
-      ["Battlefields", p.deck.battlefields.map((e) => e.id)],
-      ["Runes", (p.deck.runes || []).map((e) => e.id)],
-      ["Side deck", p.deck.sideboard.map((e) => e.id)],
-    ];
-    const optgroups = groups
-      .filter(([, ids]) => ids.length)
+    const cards = p.displayCards || [];
+    const groupOrder = ["Legend", "Champion", "Main deck", "Side deck"];
+    const byGroup = new Map();
+    for (const c of cards) {
+      if (!byGroup.has(c.group)) byGroup.set(c.group, []);
+      byGroup.get(c.group).push(c);
+    }
+    const optgroups = groupOrder
+      .filter((g) => byGroup.has(g))
       .map(
-        ([label, ids]) =>
-          `<optgroup label="${label}">${ids
-            .map((cid) => `<option value="${cid}" ${cid === current ? "selected" : ""}>${escapeHtml(cardName(cid))}</option>`)
+        (label) =>
+          `<optgroup label="${label}">${byGroup
+            .get(label)
+            .map(
+              (c) =>
+                `<option value="${c.id}" ${c.id === current ? "selected" : ""}>${escapeHtml(c.label || cardName(c.id))}</option>`
+            )
             .join("")}</optgroup>`
       )
       .join("");
@@ -592,12 +595,8 @@ function renderStreamDeck() {
   if (!status || !data) return;
   const counts = ["p1", "p2"].map((id) => {
     const p = player(id);
-    const n =
-      (p.deck.maindeck?.length || 0) +
-      (p.deck.sideboard?.length || 0) +
-      (p.deck.legend ? 1 : 0) +
-      (p.deck.champions?.length || 0);
-    return `${playerName(id)}: ${n} deck entries`;
+    const n = p.displayCards?.length ?? 0;
+    return `${playerName(id)}: ${n} cards`;
   });
   status.textContent = `Profile will include — ${counts.join(" · ")}. Re-download after importing new decks.`;
 }

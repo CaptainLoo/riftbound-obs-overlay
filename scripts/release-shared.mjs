@@ -63,7 +63,7 @@ if errorlevel 1 pause
 title Riftbound OBS — Update
 cd /d "%~dp0"
 echo Applying update...
-node\\node.exe server\\update-apply.js "%~dp0"
+node\\node.exe server\\update-apply.js
 if errorlevel 1 (
   echo Update failed.
   pause

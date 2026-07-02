@@ -21,6 +21,7 @@ const PLUGIN = {
   wingame: "com.riftbound.obs.wingame",
   game: "com.riftbound.obs.game",
   battlefield: "com.riftbound.obs.battlefield",
+  gamepoint: "com.riftbound.obs.gamepoint",
 };
 
 export const DEVICES = {
@@ -137,6 +138,10 @@ function buildControlPage(device, data, baseSettings) {
     put(6, 0, PLUGIN.wingame, "P2 win", { ...baseSettings, player: "p2" }, "P2 Win");
     put(0, 1, PLUGIN.hideplayer, "Hide P1", { ...baseSettings, player: "p1" }, "Hide P1");
     put(1, 1, PLUGIN.hideplayer, "Hide P2", { ...baseSettings, player: "p2" }, "Hide P2");
+    put(2, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p1", delta: 1 }, "P1 +");
+    put(3, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p1", delta: -1 }, "P1 −");
+    put(4, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p2", delta: 1 }, "P2 +");
+    put(5, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p2", delta: -1 }, "P2 −");
 
     p1Bfs.forEach((bf, i) => {
       if (i >= 6) return;
@@ -165,9 +170,10 @@ function buildControlPage(device, data, baseSettings) {
     put(3, 0, PLUGIN.game, "Game 2", { ...baseSettings, index: 1 }, "G2");
     put(4, 0, PLUGIN.game, "Game 3", { ...baseSettings, index: 2 }, "G3");
     put(0, 1, PLUGIN.wingame, "P1 win", { ...baseSettings, player: "p1" }, "P1 Win");
-    put(1, 1, PLUGIN.wingame, "P2 win", { ...baseSettings, player: "p2" }, "P2 Win");
-    put(2, 1, PLUGIN.hideplayer, "Hide P1", { ...baseSettings, player: "p1" }, "Hide P1");
-    put(3, 1, PLUGIN.hideplayer, "Hide P2", { ...baseSettings, player: "p2" }, "Hide P2");
+    put(1, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p1", delta: 1 }, "P1 +");
+    put(2, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p1", delta: -1 }, "P1 −");
+    put(3, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p2", delta: 1 }, "P2 +");
+    put(4, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p2", delta: -1 }, "P2 −");
 
     p1Bfs.slice(0, 2).forEach((bf, i) => {
       put(1 + i, 2, PLUGIN.battlefield, "Battlefield", {

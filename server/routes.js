@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, defaultLayout, defaultMatch, defaultDisplay, FORMATS, CARD_ANIMATIONS } from "./db.js";
-import { playerDisplayCards, playerBattlefields, resolveDisplayCard } from "./deckCards.js";
+import { playerDisplayCards, playerBattlefields, resolveDisplayCard, displayCardEntries } from "./deckCards.js";
 import { searchByName, cacheCard } from "./riftscribe.js";
 import { parseDecklist, resolveDecklist, resolveTTS } from "./decklist.js";
 import { buildState, broadcastState } from "./hub.js";
@@ -63,7 +63,10 @@ router.get("/state", (_req, res) => {
 
 router.get("/data", (_req, res) => {
   res.json({
-    players: db.data.players,
+    players: db.data.players.map((p) => ({
+      ...p,
+      displayCards: displayCardEntries(p.deck, db.data.cardsCache),
+    })),
     match: db.data.match,
     display: db.data.display,
     layout: db.data.layout,
@@ -261,7 +264,12 @@ router.get("/streamdeck", (_req, res) => {
     showing,
     match: {
       currentGame: match.currentGame,
-      games: match.games.map((g) => ({ battlefield: g.battlefield, champion: g.champion })),
+      currentScore: match.games[match.currentGame]?.score || { p1: 0, p2: 0 },
+      games: match.games.map((g) => ({
+        battlefield: g.battlefield,
+        champion: g.champion,
+        score: g.score,
+      })),
     },
     devices: DEVICES,
     profileUrl: "/api/streamdeck/profile",
@@ -277,6 +285,10 @@ router.get("/streamdeck", (_req, res) => {
       clearP2: "/api/hot/clear/p2",
       winP1: "/api/hot/win/p1",
       winP2: "/api/hot/win/p2",
+      scoreP1Inc: "/api/hot/score/p1/inc",
+      scoreP1Dec: "/api/hot/score/p1/dec",
+      scoreP2Inc: "/api/hot/score/p2/inc",
+      scoreP2Dec: "/api/hot/score/p2/dec",
     },
   });
 });
@@ -390,6 +402,28 @@ router.get("/hot/battlefield/:player/:cardId", async (req, res) => {
   broadcastState();
   const name = db.data.cardsCache[cardId]?.name || cardId;
   res.json({ ok: true, gameIndex, player, cardId, name, game });
+});
+
+router.get("/hot/score/:player/:op", async (req, res) => {
+  const player = req.params.player;
+  if (!PLAYER_IDS.includes(player)) return res.status(400).json({ error: "invalid player" });
+  const op = req.params.op;
+  if (op !== "inc" && op !== "dec") return res.status(400).json({ error: "invalid op (inc|dec)" });
+  const match = db.data.match;
+  const game = match.games[match.currentGame];
+  if (!game) return res.status(400).json({ error: "invalid game" });
+  if (!game.score) game.score = { p1: 0, p2: 0 };
+  const delta = op === "inc" ? 1 : -1;
+  game.score[player] = Math.max(0, (game.score[player] || 0) + delta);
+  await db.write();
+  broadcastState();
+  res.json({
+    ok: true,
+    player,
+    delta,
+    currentGame: match.currentGame,
+    score: game.score,
+  });
 });
 
 router.post("/display/card", async (req, res) => {
