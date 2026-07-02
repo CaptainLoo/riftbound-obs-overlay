@@ -60,9 +60,13 @@ export async function renderLabelImage(label, iconKey, size = 96) {
   <text x="50%" y="${startY}" text-anchor="middle" fill="#ffffff" font-family="Segoe UI, Arial, sans-serif" font-size="${fontSize}" font-weight="600">${tspans}</text>
 </svg>`;
 
-  const jpeg = await sharp(Buffer.from(svg)).jpeg({ quality: 85 }).toBuffer();
-  labelCache.set(cacheKey, jpeg);
-  return jpeg;
+  const raw = await sharp(Buffer.from(svg))
+    .resize(size, size)
+    .flatten()
+    .raw()
+    .toBuffer();
+  labelCache.set(cacheKey, raw);
+  return raw;
 }
 
 async function localCardPath(thumbLocal) {
@@ -100,7 +104,8 @@ export async function renderCardKeyImage(cardId, cardsCache, label, size = 96) {
 
   const jpeg = await sharp(resized)
     .composite([{ input: overlaySvg, top: size - barH, left: 0 }])
-    .jpeg({ quality: 88 })
+    .flatten()
+    .raw()
     .toBuffer();
 
   cardCache.set(cacheKey, jpeg);

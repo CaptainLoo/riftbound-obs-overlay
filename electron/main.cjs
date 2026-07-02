@@ -16,17 +16,14 @@ let mainWindow = null;
 let tray = null;
 let closeServer = null;
 let isQuitting = false;
+let shuttingDown = false;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    }
+    showMainWindow();
   });
 }
 
@@ -63,6 +60,29 @@ function buildMenu() {
   ]);
 }
 
+function showMainWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+  if (closeServer && !isQuitting) {
+    createWindow(PORT);
+  }
+}
+
+function destroyTray() {
+  if (tray) {
+    try {
+      tray.destroy();
+    } catch {
+      /* ignore */
+    }
+    tray = null;
+  }
+}
+
 function createTray() {
   const iconPath = path.join(__dirname, "icon.png");
   tray = new Tray(nativeImage.createFromPath(iconPath));
@@ -71,12 +91,7 @@ function createTray() {
     Menu.buildFromTemplate([
       {
         label: "Show control panel",
-        click: () => {
-          if (mainWindow) {
-            mainWindow.show();
-            mainWindow.focus();
-          }
-        },
+        click: () => showMainWindow(),
       },
       {
         label: "Copy overlay URL",
@@ -95,12 +110,7 @@ function createTray() {
       },
     ])
   );
-  tray.on("double-click", () => {
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
+  tray.on("double-click", () => showMainWindow());
 }
 
 function createWindow(port) {
@@ -123,10 +133,18 @@ function createWindow(port) {
   Menu.setApplicationMenu(buildMenu());
   mainWindow.loadURL(`http://127.0.0.1:${port}/control`);
 
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
   mainWindow.on("close", (event) => {
     if (!isQuitting && process.platform === "darwin") {
       event.preventDefault();
       mainWindow.hide();
+      return;
+    }
+    if (!isQuitting) {
+      isQuitting = true;
     }
   });
 }
@@ -145,8 +163,10 @@ app.whenReady().then(boot).catch((err) => {
 });
 
 app.on("before-quit", async (event) => {
+  if (shuttingDown) return;
   if (!closeServer) return;
   event.preventDefault();
+  shuttingDown = true;
   isQuitting = true;
   try {
     await closeServer();
@@ -154,18 +174,18 @@ app.on("before-quit", async (event) => {
     console.error(err);
   }
   closeServer = null;
+  destroyTray();
+  mainWindow = null;
   app.exit(0);
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    if (!isQuitting) {
-      isQuitting = true;
-      app.quit();
-    }
+  if (process.platform !== "darwin" && !isQuitting) {
+    isQuitting = true;
+    app.quit();
   }
 });
 
 app.on("activate", () => {
-  if (mainWindow) mainWindow.show();
+  showMainWindow();
 });

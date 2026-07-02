@@ -156,7 +156,7 @@ async function drawCurrentPage() {
   for (const [idx, keyDef] of page.keys.entries()) {
     if (!validIndices.has(idx)) continue;
     const jpeg = await renderKeyImage(keyDef, db.data.cardsCache, keySize);
-    await deck.fillKeyBuffer(idx, jpeg);
+    await deck.fillKeyBuffer(idx, jpeg, { format: "rgb" });
   }
 }
 
