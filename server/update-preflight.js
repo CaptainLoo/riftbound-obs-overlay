@@ -2,6 +2,8 @@
  * Pre-apply validation for updates.
  */
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { findBootstrapScript } from "./launcher.js";
+import { IS_ELECTRON, getInstallRoot } from "./paths.js";
 import { pendingPath, sha256File, logPath as updateLogPath } from "./update-utils.js";
 import { compareSemver, getVersion } from "./version.js";
 
