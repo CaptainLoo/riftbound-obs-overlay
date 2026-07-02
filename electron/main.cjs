@@ -23,6 +23,9 @@ function logStartup(message, err) {
 
 logStartup("Electron main starting");
 
+// Avoid GPU-related startup crashes on some Windows setups.
+app.disableHardwareAcceleration();
+
 process.env.RIFTBOUND_ELECTRON = "1";
 if (!app.isPackaged) {
   process.env.RIFTBOUND_DEV = "1";
@@ -39,6 +42,7 @@ let tray = null;
 let closeServer = null;
 let isQuitting = false;
 let shuttingDown = false;
+let attachedToExistingServer = false;
 
 function showStartupError(title, message) {
   logStartup(`ERROR: ${title}`, message);
@@ -72,6 +76,15 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   logStartup("[main] unhandledRejection", reason);
 });
+
+async function probeLocalServer(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/version`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 async function loadStartServer() {
   const entry = app.isPackaged
@@ -113,7 +126,7 @@ function showMainWindow() {
     mainWindow.focus();
     return;
   }
-  if (closeServer && !isQuitting) {
+  if ((closeServer || attachedToExistingServer) && !isQuitting) {
     createWindow(PORT);
   }
 }
@@ -130,8 +143,17 @@ function destroyTray() {
 }
 
 function createTray() {
+  if (process.env.RIFTBOUND_NO_TRAY === "1") {
+    logStartup("Tray skipped (RIFTBOUND_NO_TRAY=1)");
+    return;
+  }
   const iconPath = path.join(__dirname, "icon.png");
-  tray = new Tray(nativeImage.createFromPath(iconPath));
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    logStartup("Tray skipped — icon not found or empty");
+    return;
+  }
+  tray = new Tray(icon);
   tray.setToolTip("Riftbound OBS");
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -173,14 +195,23 @@ function createWindow(port) {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
     },
   });
 
   Menu.setApplicationMenu(buildMenu());
-  mainWindow.once("ready-to-show", () => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    logStartup("[main] render-process-gone", details);
   });
+
+  mainWindow.once("ready-to-show", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      logStartup("Control window shown");
+    }
+  });
+
   mainWindow.loadURL(`http://127.0.0.1:${port}/control`).catch((err) => {
     showStartupError("Control panel failed to load", err?.message || String(err));
   });
@@ -205,34 +236,52 @@ async function boot() {
   logStartup("Loading server…");
   const startServer = await loadStartServer();
   logStartup("Starting server…");
-  const result = await startServer({ port: PORT, openBrowser: false });
-  closeServer = result.close;
-  logStartup(`Server ready on port ${result.port}`);
-  createWindow(result.port);
   try {
-    createTray();
-    logStartup("Tray created");
+    const result = await startServer({ port: PORT, openBrowser: false });
+    closeServer = result.close;
+    logStartup(`Server ready on port ${result.port}`);
   } catch (err) {
-    logStartup("[main] Tray failed", err);
+    const portBusy = /already in use|EADDRINUSE/i.test(String(err?.message || err));
+    if (portBusy && (await probeLocalServer(PORT))) {
+      attachedToExistingServer = true;
+      logStartup(`Port ${PORT} busy — attached to existing Riftbound server`);
+    } else {
+      throw err;
+    }
   }
+
+  createWindow(PORT);
+  setTimeout(() => {
+    try {
+      createTray();
+      logStartup("Tray created");
+    } catch (err) {
+      logStartup("[main] Tray failed", err);
+    }
+  }, 1500);
 }
 
 app.whenReady().then(boot).catch((err) => {
-  console.error(err);
+  logStartup("Boot failed", err);
   showStartupError("Riftbound OBS failed to start", err?.message || String(err));
   app.quit();
 });
 
 app.on("before-quit", async (event) => {
   if (shuttingDown) return;
-  if (!closeServer) return;
+  if (!closeServer) {
+    logStartup("Quit without stopping server (attached mode or no server)");
+    return;
+  }
   event.preventDefault();
   shuttingDown = true;
   isQuitting = true;
   try {
+    logStartup("Stopping server…");
     await closeServer();
+    logStartup("Server stopped");
   } catch (err) {
-    console.error(err);
+    logStartup("Server stop error", err);
   }
   closeServer = null;
   destroyTray();

@@ -65,7 +65,7 @@ export async function startServer(options = {}) {
   console.log(`  Control panel            : http://localhost:${port}/control`);
   if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
   if (IS_ELECTRON && process.platform === "win32") {
-    startStreamDeckSafe();
+    setTimeout(() => startStreamDeckSafe(), 8000);
   }
 
   if (openBrowser) {
