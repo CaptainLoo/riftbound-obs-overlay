@@ -43,18 +43,32 @@ const legacyWin = join(ROOT, "dist", "win");
 rmSync(legacyWin, { recursive: true, force: true });
 cpSync(winUnpacked, legacyWin, { recursive: true });
 
+const setupInElectron = join(ROOT, "dist", "electron", `riftbound-setup-${version}.exe`);
+const setupOut = join(ROOT, "dist", `riftbound-setup-${version}.exe`);
+if (existsSync(setupInElectron)) {
+  cpSync(setupInElectron, setupOut, { force: true });
+  console.log(`\nInstaller copied → ${setupOut}`);
+}
+
 const zipOut = join(ROOT, "dist", "riftbound-obs-windows.zip");
 try {
   rmSync(zipOut, { force: true });
-  execSync(`cd "${join(ROOT, "dist")}" && zip -r -q riftbound-obs-windows.zip win`, {
-    stdio: "inherit",
-  });
+  if (process.platform === "win32") {
+    const winDir = join(ROOT, "dist", "win");
+    execSync(
+      `powershell -NoProfile -Command "Compress-Archive -LiteralPath '${winDir.replace(/'/g, "''")}' -DestinationPath '${zipOut.replace(/'/g, "''")}' -Force"`,
+      { stdio: "inherit" }
+    );
+  } else {
+    execSync(`cd "${join(ROOT, "dist")}" && zip -r -q riftbound-obs-windows.zip win`, {
+      stdio: "inherit",
+    });
+  }
   console.log(`\nZip: ${zipOut}`);
-} catch {
-  console.log("\n(zip skipped — install `zip` or compress manually)");
+} catch (err) {
+  console.log(`\n(zip skipped — ${err.message || "compress manually"})`);
 }
 
-const setupGlob = join(ROOT, "dist", "electron", `riftbound-setup-${version}.exe`);
 console.log(`\nPortable: ${winUnpacked}`);
-console.log(`Installer: ${setupGlob}`);
+console.log(`Installer: ${existsSync(setupOut) ? setupOut : setupInElectron}`);
 console.log(`Legacy alias: ${legacyWin}\n`);

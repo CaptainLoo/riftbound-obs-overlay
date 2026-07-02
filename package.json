@@ -69,7 +69,8 @@
           ]
         }
       ],
-      "icon": "electron/icon.png"
+      "icon": "electron/icon.png",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
