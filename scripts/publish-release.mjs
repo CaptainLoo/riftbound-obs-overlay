@@ -3,7 +3,7 @@
  * Bump version, build patch + full Windows release + installer, publish to GitHub Releases.
  */
 import { execSync } from "node:child_process";
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ROOT,
@@ -49,18 +49,10 @@ execSync("npm run build:win", {
   env: { ...process.env, SKIP_STREAMDECK_BUILD: "1" },
 });
 
-console.log("\nBuilding Windows installer…");
-let hasInstaller = false;
-try {
-  execSync("npm run build:installer", { cwd: ROOT, stdio: "inherit" });
-  hasInstaller = existsSync(join(ROOT, "dist", `riftbound-setup-${version}.exe`));
-} catch {
-  console.warn("\nInstaller build skipped or failed (iscc not available). Continuing without setup.exe.\n");
-}
+// Installer (.exe) is built on GitHub Actions (Windows) when the release tag is pushed.
 
 const patchZip = join(ROOT, "dist", `riftbound-obs-patch-${version}.zip`);
 const fullZip = join(ROOT, "dist", "riftbound-obs-windows.zip");
-const setupExe = join(ROOT, "dist", `riftbound-setup-${version}.exe`);
 const patchSha = await sha256File(patchZip);
 
 const notesArg = args.find((a) => a.startsWith("--notes="));
@@ -83,24 +75,13 @@ const updateManifest = {
   },
 };
 
-if (hasInstaller) {
-  const setupSha = await sha256File(setupExe);
-  updateManifest.installer = {
-    file: `riftbound-setup-${version}.exe`,
-    sha256: setupSha,
-    size: statSync(setupExe).size,
-  };
-}
-
 const manifestPath = join(ROOT, "dist", "update-manifest.json");
 writeFileSync(manifestPath, `${JSON.stringify(updateManifest, null, 2)}\n`, "utf8");
 
 const tag = `v${version}`;
 console.log(`\nCreating GitHub release ${tag} on ${repo}…`);
 
-const assets = [`"${patchZip}"`, `"${fullZip}"`];
-if (hasInstaller) assets.push(`"${setupExe}"`);
-assets.push(`"${manifestPath}"`);
+const assets = [`"${patchZip}"`, `"${fullZip}"`, `"${manifestPath}"`];
 
 try {
   execSync(`gh release view ${tag} --repo ${repo}`, { stdio: "ignore" });
@@ -115,5 +96,23 @@ try {
   );
 }
 
+try {
+  execSync(`git rev-parse ${tag}`, { cwd: ROOT, stdio: "ignore" });
+  console.log(`Git tag ${tag} already exists.`);
+} catch {
+  execSync(`git tag ${tag}`, { cwd: ROOT, stdio: "inherit" });
+  console.log(`Created git tag ${tag}.`);
+}
+
+try {
+  execSync(`git push origin ${tag}`, { cwd: ROOT, stdio: "inherit" });
+  console.log(`Pushed tag ${tag} — CI will build riftbound-setup-${version}.exe on Windows.\n`);
+} catch (err) {
+  console.warn(
+    `\nCould not push tag ${tag}. Push it manually to trigger the installer build:\n  git push origin ${tag}\n`
+  );
+}
+
 console.log(`\nPublished: https://github.com/${repo}/releases/tag/${tag}`);
-console.log("Windows users will see the update in the control panel.\n");
+console.log("Assets now: patch zip, portable zip, update-manifest.json");
+console.log(`CI workflow "Release Installer" attaches riftbound-setup-${version}.exe within a few minutes.\n`);

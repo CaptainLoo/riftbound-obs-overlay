@@ -1,0 +1,82 @@
+name: Release Installer
+
+# Builds riftbound-setup-VERSION.exe on Windows after `npm run publish` pushes tag v*.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag (e.g. v0.1.5)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Add ISCC to PATH
+        run: echo "C:/Program Files (x86)/Inno Setup 6" >> "$GITHUB_PATH"
+        shell: bash
+
+      - name: Download portable zip from release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "riftbound-obs-windows.zip" --dir dist
+          unzip -q dist/riftbound-obs-windows.zip -d dist
+          test -d dist/win
+
+      - name: Build installer
+        shell: bash
+        run: npm run build:installer
+
+      - name: Patch update manifest with installer metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: node scripts/update-manifest-installer.mjs
+
+      - name: Upload installer and manifest to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" \
+            "dist/riftbound-setup-${VERSION}.exe" \
+            "dist/update-manifest.json" \
+            --repo "${{ github.repository }}" \
+            --clobber

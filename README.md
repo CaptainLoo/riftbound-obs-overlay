@@ -96,12 +96,16 @@ npm start              # test locally
 npm run publish        # bump patch version, build, push GitHub Release
 ```
 
-`npm run publish` uploads:
+`npm run publish` uploads immediately:
 
-- `riftbound-obs-patch-X.Y.Z.zip` — incremental update (~1 MB)
-- `riftbound-obs-windows.zip` — full portable zip for new machines
-- `riftbound-setup-X.Y.Z.exe` — Windows installer (when Inno Setup `iscc` is available)
-- `update-manifest.json` — version, SHA256, node version, patch vs installer routing
+- `riftbound-obs-patch-X.Y.Z.zip`
+- `riftbound-obs-windows.zip`
+- `update-manifest.json`
+
+Then pushes git tag `vX.Y.Z` → CI attaches within a few minutes:
+
+- `riftbound-setup-X.Y.Z.exe` (Windows installer, built on GitHub Actions)
+- updated `update-manifest.json` (with installer SHA256)
 
 Options: `npm run publish -- minor`, `npm run publish -- --no-bump`, `npm run publish -- --notes="Fix overlay"`.
 
@@ -113,7 +117,7 @@ npm run build:win         # portable folder + zip
 npm run build:installer   # setup.exe (requires Inno Setup 6+)
 ```
 
-GitHub Actions workflow (`.github/workflows/release.yml`) builds all assets on tagged releases.
+GitHub Actions workflow **Release Installer** (`.github/workflows/release-installer.yml`) builds `riftbound-setup-X.Y.Z.exe` on Windows automatically when `npm run publish` pushes the release tag. No Inno Setup needed on Mac.
 
 ### On Windows (after first install)
 
