@@ -131,13 +131,16 @@ body {
 .slot-image.frame-card {
   border-radius: 8px;
   background: linear-gradient(145deg, rgba(30, 45, 80, 0.92), rgba(12, 18, 32, 0.96));
-  border: 1px solid rgba(106, 166, 255, 0.35);
+  border: 2px solid rgba(106, 166, 255, 0.55);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 .slot-image.frame-legend {
-  border-color: rgba(201, 162, 39, 0.55);
-  box-shadow: 0 0 20px rgba(201, 162, 39, 0.14);
+  border-color: rgba(201, 162, 39, 0.9);
+  box-shadow:
+    0 0 0 1px rgba(255, 220, 120, 0.35),
+    0 0 28px rgba(201, 162, 39, 0.32),
+    0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 .slot-image.frame-card {
@@ -152,8 +155,11 @@ body {
   overflow: hidden;
   border-radius: 4% / 5.5%;
   background: #0a0e18;
-  border: 1px solid rgba(106, 166, 255, 0.4);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(106, 166, 255, 0.8);
+  box-shadow:
+    0 0 0 1px rgba(160, 205, 255, 0.35),
+    0 0 24px rgba(106, 166, 255, 0.28),
+    0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 /* Play area — transparent hole for OBS camera underneath */
@@ -465,7 +471,11 @@ body {
 .mp-legend img {
   height: 34vh;
   border-radius: 1vh;
-  filter: drop-shadow(0 0.6vh 1.6vh rgba(0, 0, 0, 0.6));
+  border: 2px solid rgba(201, 162, 39, 0.9);
+  box-shadow:
+    0 0 0 1px rgba(255, 220, 120, 0.3),
+    0 0 20px rgba(201, 162, 39, 0.28),
+    0 0.6vh 1.6vh rgba(0, 0, 0, 0.6);
 }
 .mp-champion {
   display: flex;
@@ -494,5 +504,9 @@ body {
   height: 10vh;
   border-radius: 4% / 5.5%;
   object-fit: cover;
-  filter: drop-shadow(0 0.4vh 1vh rgba(0, 0, 0, 0.6));
+  border: 2px solid rgba(106, 166, 255, 0.8);
+  box-shadow:
+    0 0 0 1px rgba(160, 205, 255, 0.3),
+    0 0 16px rgba(106, 166, 255, 0.24),
+    0 0.4vh 1vh rgba(0, 0, 0, 0.6);
 }
