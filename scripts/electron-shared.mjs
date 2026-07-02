@@ -21,7 +21,7 @@ export function prepareElectronResources() {
     readFileSync(join(ROOT, "node_modules", "electron", "package.json"), "utf8")
   ).version;
   execSync(
-    `npx electron-rebuild --project "${ELECTRON_STAGING}" --force --only sharp,node-hid --version ${electronVer}`,
+    `npx electron-rebuild --module-dir "${ELECTRON_STAGING}" --force --only sharp,node-hid --version ${electronVer}`,
     { cwd: ROOT, stdio: "inherit" }
   );
 
