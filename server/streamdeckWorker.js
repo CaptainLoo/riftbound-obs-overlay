@@ -1,7 +1,7 @@
 /**
  * Stream Deck HID worker — runs in a separate process so native crashes cannot take down the app.
  */
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { DATA_DIR } from "./paths.js";
@@ -10,6 +10,7 @@ import { logStartup } from "./startupLog.js";
 
 const STATUS_FILE = join(DATA_DIR, "streamdeck-status.json");
 const QUICK_CLOSE_FLAG = join(DATA_DIR, "streamdeck-quick-close.flag");
+const COMMAND_FILE = join(DATA_DIR, "streamdeck-command.json");
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 
 function writeStatus(status) {
@@ -152,6 +153,23 @@ async function main() {
 
   connectWs();
   setInterval(publishStatus, 3000);
+
+  const pollCommands = () => {
+    if (!existsSync(COMMAND_FILE)) return;
+    try {
+      const cmd = JSON.parse(readFileSync(COMMAND_FILE, "utf8"));
+      rmSync(COMMAND_FILE, { force: true });
+      if (cmd.cmd === "refresh-images") {
+        refreshStreamDeck(Boolean(cmd.force))
+          .then(publishStatus)
+          .catch((err) => logStartup("[streamdeck-worker] refresh-images failed", err));
+      }
+    } catch (err) {
+      logStartup("[streamdeck-worker] command poll failed", err);
+      rmSync(COMMAND_FILE, { force: true });
+    }
+  };
+  setInterval(pollCommands, 500);
 
   logStartup("[streamdeck-worker] running");
 }

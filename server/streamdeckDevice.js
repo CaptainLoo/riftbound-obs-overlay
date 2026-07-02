@@ -2,11 +2,19 @@ import { platform } from "node:os";
 import { IS_ELECTRON } from "./paths.js";
 import { db } from "./db.js";
 import { buildPages, detectDeviceKey } from "./streamdeckLayout.js";
+import {
+  collectPageCardIds,
+  collectStreamDeckCardIds,
+  ensureCardAssets,
+} from "./streamdeckCardAssets.js";
 import { logStartup } from "./startupLog.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 const API = `http://127.0.0.1:${DEFAULT_PORT}/api`;
-const KEY_DRAW_TIMEOUT_MS = 8000;
+const KEY_RENDER_TIMEOUT_MS = 8000;
+const KEY_UPLOAD_TIMEOUT_MS = 20000;
+const PROBE_UPLOAD_TIMEOUT_MS = 5000;
+const CARD_KEY_TYPES = new Set(["showCard", "battlefield"]);
 
 let nodeLib = null;
 let imagesMod = null;
@@ -51,6 +59,14 @@ let status = {
   drawProgress: null,
   imagesReady: false,
   imagesDegraded: false,
+  imageUploadOk: null,
+  imageUploadError: null,
+  imagesDrawnCount: 0,
+  imagesFailedCount: 0,
+  cardPrefetch: null,
+  cardsReady: 0,
+  cardsTotal: 0,
+  cardsMissing: [],
   hint: null,
 };
 
@@ -165,6 +181,110 @@ async function fillKeyBufferYielding(keyIndex, rgb, options) {
   }
 }
 
+async function fillKeyBufferWithFallback(keyIndex, rgb, options) {
+  try {
+    await fillKeyBufferYielding(keyIndex, rgb, options);
+  } catch (yieldErr) {
+    logStartup(`[streamdeck] Key ${keyIndex} yielding upload failed, retrying native: ${yieldErr.message}`);
+    await deck.fillKeyBuffer(keyIndex, rgb, options);
+  }
+}
+
+async function probeKeyImageUpload() {
+  if (!deck) return { ok: false, error: "No device" };
+  const controls = deck.CONTROLS.filter((c) => c.type === "button");
+  const probeIndex = controls[0]?.index ?? 0;
+  try {
+    const { renderLabelImage } = await loadImagesMod();
+    const rgb = await renderLabelImage("OK", "game", keySize);
+    await withTimeout(
+      fillKeyBufferWithFallback(probeIndex, rgb, { format: "rgb" }),
+      PROBE_UPLOAD_TIMEOUT_MS,
+      "Image upload probe"
+    );
+    logStartup(`[streamdeck] Image upload probe OK (key ${probeIndex})`);
+    return { ok: true, error: null };
+  } catch (err) {
+    logStartup(`[streamdeck] Image upload probe failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+}
+
+function buildDrawHint({ failed, drawn, imageUploadOk, cardsMissing }) {
+  if (imageUploadOk === false) {
+    return "Key image upload unavailable — buttons work with colors only. Reinstall Riftbound OBS.";
+  }
+  if (cardsMissing?.length) {
+    const n = cardsMissing.length;
+    return `${n} card image${n > 1 ? "s" : ""} missing — re-import deck or click Refresh images.`;
+  }
+  if (failed > 0) {
+    return `${failed} key(s) show colors only — buttons still work. Reinstall the app for full labels.`;
+  }
+  if (drawn === 0) {
+    return "Key labels unavailable — buttons work with colors only.";
+  }
+  return null;
+}
+
+async function prefetchCardAssets(cardIds) {
+  if (!cardIds.length) {
+    setStatus({ cardPrefetch: null, cardsReady: 0, cardsTotal: 0, cardsMissing: [] });
+    return { ready: 0, total: 0, missing: [] };
+  }
+
+  setStatus({ cardPrefetch: { done: 0, total: cardIds.length } });
+  const result = await ensureCardAssets(cardIds, (progress) => {
+    setStatus({ cardPrefetch: progress });
+  });
+
+  const { invalidateCardCache } = await loadImagesMod();
+  for (const id of cardIds) {
+    invalidateCardCache(id);
+  }
+
+  setStatus({
+    cardPrefetch: null,
+    cardsReady: result.ready,
+    cardsTotal: result.total,
+    cardsMissing: result.missing.slice(0, 5),
+  });
+  return result;
+}
+
+async function prefetchForCurrentContext() {
+  const allIds = collectStreamDeckCardIds(db.data, deviceKey);
+  const page = pages[currentPageIndex];
+  const pageIds = page ? collectPageCardIds(page) : [];
+  const priorityIds = [...new Set([...pageIds, ...allIds])];
+  return prefetchCardAssets(priorityIds);
+}
+
+let prefetchInFlight = false;
+let prefetchQueued = false;
+
+async function schedulePrefetchAndDraw() {
+  if (prefetchInFlight) {
+    prefetchQueued = true;
+    return;
+  }
+  prefetchInFlight = true;
+  try {
+    do {
+      prefetchQueued = false;
+      if (status.imageUploadOk === false) return;
+      await prefetchForCurrentContext();
+      scheduleImageDraw();
+    } while (prefetchQueued);
+  } catch (err) {
+    console.error("[streamdeck] Card prefetch failed:", err.message);
+    logStartup("[streamdeck] Card prefetch failed", err);
+    scheduleImageDraw();
+  } finally {
+    prefetchInFlight = false;
+  }
+}
+
 async function flashKey(keyIndex, r, g, b) {
   if (!deck) return;
   try {
@@ -269,13 +389,36 @@ async function fillKeyWithColorFallback(keyIndex, keyDef) {
 
 async function drawCurrentPageImages(generation) {
   if (!deck || !pages.length) return { drawn: 0, failed: 0, cancelled: false };
+  if (status.imageUploadOk === false) {
+    setStatus({
+      drawProgress: null,
+      imagesReady: false,
+      imagesDegraded: true,
+      imagesDrawnCount: 0,
+      imagesFailedCount: 0,
+      hint: buildDrawHint({ failed: 0, drawn: 0, imageUploadOk: false, cardsMissing: status.cardsMissing }),
+    });
+    return { drawn: 0, failed: 0, cancelled: false };
+  }
+
   const page = pages[currentPageIndex];
   if (!page) return { drawn: 0, failed: 0, cancelled: false };
+
+  const pageIds = collectPageCardIds(page);
+  if (pageIds.length) {
+    await prefetchCardAssets(pageIds);
+  }
 
   const controls = deck.CONTROLS.filter((c) => c.type === "button");
   const validIndices = new Set(controls.map((c) => c.index));
   const expectedBytes = keySize * keySize * 3;
-  const entries = [...page.keys.entries()].filter(([idx]) => validIndices.has(idx));
+  const entries = [...page.keys.entries()]
+    .filter(([idx]) => validIndices.has(idx))
+    .sort(([, a], [, b]) => {
+      const aCard = CARD_KEY_TYPES.has(a.type) ? 0 : 1;
+      const bCard = CARD_KEY_TYPES.has(b.type) ? 0 : 1;
+      return aCard - bCard;
+    });
   const total = entries.length;
   let drawn = 0;
   let failed = 0;
@@ -300,7 +443,7 @@ async function drawCurrentPageImages(generation) {
       const { renderKeyImage } = await loadImagesMod();
       const rgb = await withTimeout(
         renderKeyImage(keyDef, db.data.cardsCache, keySize),
-        KEY_DRAW_TIMEOUT_MS,
+        KEY_RENDER_TIMEOUT_MS,
         `Key ${idx} render`
       );
       if (rgb.length !== expectedBytes) {
@@ -316,8 +459,8 @@ async function drawCurrentPageImages(generation) {
       });
 
       await withTimeout(
-        fillKeyBufferYielding(idx, rgb, { format: "rgb" }),
-        KEY_DRAW_TIMEOUT_MS,
+        fillKeyBufferWithFallback(idx, rgb, { format: "rgb" }),
+        KEY_UPLOAD_TIMEOUT_MS,
         `Key ${idx} upload`
       );
       drawn += 1;
@@ -342,17 +485,20 @@ async function drawCurrentPageImages(generation) {
     return { drawn, failed, cancelled: true };
   }
 
-  const imagesDegraded = failed > 0;
+  const imagesDegraded = failed > 0 || status.cardsMissing.length > 0;
   const imagesReady = drawn > 0;
   setStatus({
     drawProgress: null,
     imagesReady,
     imagesDegraded,
-    hint: imagesDegraded
-      ? `${failed} key(s) show colors only — buttons still work. Reinstall the app for full labels.`
-      : imagesReady
-        ? null
-        : "Key labels unavailable — buttons work with colors only.",
+    imagesDrawnCount: drawn,
+    imagesFailedCount: failed,
+    hint: buildDrawHint({
+      failed,
+      drawn,
+      imageUploadOk: status.imageUploadOk,
+      cardsMissing: status.cardsMissing,
+    }),
   });
 
   return { drawn, failed, cancelled: false };
@@ -419,8 +565,19 @@ export async function refreshStreamDeck(force = false) {
       const { clearImageCaches } = await loadImagesMod();
       clearImageCaches();
     }
-    await rebuildPages(false);
-    setStatus({ error: null, phase: "connected" });
+    deviceKey = detectDeviceKey(deck);
+    pages = buildPages(db.data, deviceKey);
+    if (currentPageIndex >= pages.length) currentPageIndex = 0;
+    setStatus({
+      deviceKey,
+      pageCount: pages.length,
+      pageNames: pages.map((p) => p.name),
+      currentPage: currentPageIndex,
+      error: null,
+      phase: "connected",
+    });
+    await drawCurrentPageColorsOnly();
+    await schedulePrefetchAndDraw();
   } catch (err) {
     console.error("[streamdeck] Refresh failed:", err);
     setStatus({ error: formatError(err), phase: "error" });
@@ -562,15 +719,23 @@ export async function startStreamDeck() {
 
     await drawCurrentPageColorsOnly();
 
+    const probe = await probeKeyImageUpload();
     setStatus({
       connected: true,
       phase: "connected",
       drawProgress: null,
+      imageUploadOk: probe.ok,
+      imageUploadError: probe.error,
+      hint: probe.ok
+        ? null
+        : "Key image upload unavailable — buttons work with colors only. Reinstall Riftbound OBS.",
     });
 
     console.log(`[streamdeck] Connected: ${deck.PRODUCT_NAME} (${pages.length} pages)`);
     logStartup(`[streamdeck] Connected: ${deck.PRODUCT_NAME} (${pages.length} pages)`);
-    scheduleImageDraw();
+    if (probe.ok) {
+      schedulePrefetchAndDraw();
+    }
   } catch (err) {
     console.error("[streamdeck] Failed to open device:", err);
     deck = null;
@@ -615,6 +780,14 @@ export async function stopStreamDeck() {
     drawProgress: null,
     imagesReady: false,
     imagesDegraded: false,
+    imageUploadOk: null,
+    imageUploadError: null,
+    imagesDrawnCount: 0,
+    imagesFailedCount: 0,
+    cardPrefetch: null,
+    cardsReady: 0,
+    cardsTotal: 0,
+    cardsMissing: [],
     hint: null,
   });
 }

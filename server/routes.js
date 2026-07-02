@@ -5,7 +5,7 @@ import { searchByName, cacheCard } from "./riftscribe.js";
 import { parseDecklist, resolveDecklist, resolveTTS } from "./decklist.js";
 import { buildState, broadcastState } from "./hub.js";
 import { DEVICES } from "./streamdeckLayout.js";
-import { getStreamDeckStatusSafe, reconnectStreamDeckSafe } from "./streamdeckApi.js";
+import { getStreamDeckStatusSafe, reconnectStreamDeckSafe, queueStreamDeckRefreshImages } from "./streamdeckApi.js";
 import {
   applyUpdate,
   checkForUpdate,
@@ -284,6 +284,14 @@ router.post("/streamdeck/reconnect", async (_req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+router.post("/streamdeck/refresh-images", async (_req, res) => {
+  const queued = queueStreamDeckRefreshImages(true);
+  if (!queued) {
+    return res.status(503).json({ ok: false, error: "Stream Deck worker is not running." });
+  }
+  res.json({ ok: true, queued: true });
 });
 
 // One-click GET URLs for Stream Deck (Website / Web Request plugins).

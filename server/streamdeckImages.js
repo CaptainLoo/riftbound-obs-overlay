@@ -56,6 +56,14 @@ function wrapLabel(text, max = 14) {
   return lines.slice(0, 3);
 }
 
+function assertRgbBuffer(buffer, size, label) {
+  const expected = size * size * 3;
+  if (buffer.length !== expected) {
+    throw new Error(`${label}: expected ${expected} RGB bytes, got ${buffer.length}`);
+  }
+  return buffer;
+}
+
 export async function renderLabelImage(label, iconKey, size = 96) {
   const cacheKey = `${size}:${iconKey}:${label}`;
   if (labelCache.has(cacheKey)) return labelCache.get(cacheKey);
@@ -77,11 +85,12 @@ export async function renderLabelImage(label, iconKey, size = 96) {
   const sharp = await getSharp();
   const raw = await sharp(Buffer.from(svg))
     .resize(size, size)
-    .flatten()
-    .raw()
+    .removeAlpha()
+    .raw({ channels: 3 })
     .toBuffer();
-  labelCache.set(cacheKey, raw);
-  return raw;
+  const rgb = assertRgbBuffer(raw, size, `label ${label}`);
+  labelCache.set(cacheKey, rgb);
+  return rgb;
 }
 
 async function localCardPath(thumbLocal) {
@@ -101,12 +110,6 @@ export async function renderCardKeyImage(cardId, cardsCache, label, size = 96) {
     return renderLabelImage(label || cardId, "show", size);
   }
 
-  const sharp = await getSharp();
-  const resized = await sharp(src)
-    .resize(size, size, { fit: "cover", position: "centre" })
-    .jpeg({ quality: 88 })
-    .toBuffer();
-
   const lines = wrapLabel(label, 12);
   const barH = lines.length > 1 ? 28 : 22;
   const fontSize = lines.length > 1 ? 9 : 10;
@@ -118,14 +121,17 @@ export async function renderCardKeyImage(cardId, cardsCache, label, size = 96) {
   <text x="50%" y="${fontSize + 2}" text-anchor="middle" fill="#ffffff" font-family="Segoe UI, Arial, sans-serif" font-size="${fontSize}" font-weight="600">${tspans}</text>
 </svg>`);
 
-  const jpeg = await sharp(resized)
+  const sharp = await getSharp();
+  const raw = await sharp(src)
+    .resize(size, size, { fit: "cover", position: "centre" })
     .composite([{ input: overlaySvg, top: size - barH, left: 0 }])
-    .flatten()
-    .raw()
+    .removeAlpha()
+    .raw({ channels: 3 })
     .toBuffer();
 
-  cardCache.set(cacheKey, jpeg);
-  return jpeg;
+  const rgb = assertRgbBuffer(raw, size, `card ${cardId}`);
+  cardCache.set(cacheKey, rgb);
+  return rgb;
 }
 
 export async function renderKeyImage(keyDef, cardsCache, size = 96) {
@@ -137,6 +143,14 @@ export async function renderKeyImage(keyDef, cardsCache, size = 96) {
   }
   const icon = keyDef.type === "navPrev" || keyDef.type === "navNext" ? "nav" : keyDef.icon || "game";
   return renderLabelImage(keyDef.label, icon, size);
+}
+
+export function invalidateCardCache(cardId) {
+  if (!cardId) return;
+  const needle = `:${cardId}:`;
+  for (const key of cardCache.keys()) {
+    if (key.includes(needle)) cardCache.delete(key);
+  }
 }
 
 export function clearImageCaches() {

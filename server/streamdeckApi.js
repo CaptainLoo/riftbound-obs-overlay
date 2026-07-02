@@ -2,7 +2,7 @@
  * Stream Deck process manager — HID runs in a child process, not in the Electron main/server process.
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
 import { IS_ELECTRON, getContentRoot, getInstallRoot, DATA_DIR } from "./paths.js";
@@ -10,6 +10,7 @@ import { logStartup } from "./startupLog.js";
 
 const STATUS_FILE = join(DATA_DIR, "streamdeck-status.json");
 const QUICK_CLOSE_FLAG = join(DATA_DIR, "streamdeck-quick-close.flag");
+const COMMAND_FILE = join(DATA_DIR, "streamdeck-command.json");
 
 let worker = null;
 let workerStarting = false;
@@ -28,6 +29,14 @@ function idleStatus(error = null) {
     drawProgress: null,
     imagesReady: false,
     imagesDegraded: false,
+    imageUploadOk: null,
+    imageUploadError: null,
+    imagesDrawnCount: 0,
+    imagesFailedCount: 0,
+    cardPrefetch: null,
+    cardsReady: 0,
+    cardsTotal: 0,
+    cardsMissing: [],
     hint: null,
   };
 }
@@ -216,4 +225,20 @@ export async function getStreamDeckStatusSafe() {
 export function refreshStreamDeckIfConnectedSafe() {
   if (!worker) return;
   /* Worker listens to WebSocket state broadcasts and refreshes keys itself. */
+}
+
+export function queueStreamDeckRefreshImages(force = true) {
+  if (!worker) return false;
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(
+      COMMAND_FILE,
+      `${JSON.stringify({ cmd: "refresh-images", force, at: Date.now() })}\n`,
+      "utf8"
+    );
+    return true;
+  } catch (err) {
+    logStartup("[streamdeck] refresh-images command failed", err);
+    return false;
+  }
 }

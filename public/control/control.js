@@ -648,6 +648,14 @@ async function renderStreamDeck() {
       }
       if (info.firmwareVersion) parts.push(`FW ${info.firmwareVersion}`);
       if (
+        info.cardPrefetch &&
+        info.cardPrefetch.total > 0 &&
+        info.cardPrefetch.done < info.cardPrefetch.total
+      ) {
+        parts.push(
+          `Caching card images (${info.cardPrefetch.done}/${info.cardPrefetch.total})…`
+        );
+      } else if (
         info.drawProgress &&
         info.drawProgress.total > 0 &&
         info.drawProgress.done < info.drawProgress.total
@@ -665,16 +673,26 @@ async function renderStreamDeck() {
         parts.push(
           `Loading key images (${info.drawProgress.done}/${info.drawProgress.total}, ${phase}${keyNote})…`
         );
+      } else if (info.imageUploadOk === false) {
+        parts.push("Colors only (upload failed)");
       } else if (info.imagesDegraded && info.hint) {
         parts.push("Colors only");
+      } else if (info.cardsTotal > 0 && info.cardsReady === info.cardsTotal) {
+        parts.push(`${info.cardsReady} card images cached`);
       }
       detail.textContent = parts.join(" · ");
       if (hint) {
-        hint.textContent =
-          info.hint ||
-          (info.imagesDegraded
-            ? "Some keys show colors only — buttons still work."
-            : "");
+        let hintText = info.hint || "";
+        if (!hintText && info.imageUploadOk === false && info.imageUploadError) {
+          hintText = `Upload probe failed: ${info.imageUploadError}`;
+        }
+        if (!hintText && info.cardsMissing?.length) {
+          hintText = `${info.cardsMissing.length} card image(s) missing — re-import deck or click Refresh images.`;
+        }
+        if (!hintText && info.imagesDegraded) {
+          hintText = "Some keys show colors only — buttons still work.";
+        }
+        hint.textContent = hintText;
       }
     } else if (info.phase === "error" || (info.error && info.phase !== "loading" && info.phase !== "scanning" && info.phase !== "opening" && info.phase !== "drawing")) {
       badge.textContent = "Error";
@@ -778,6 +796,27 @@ if (sdReconnect) {
     } finally {
       sdReconnect.disabled = false;
       sdReconnect.textContent = prev;
+    }
+  });
+}
+
+const sdRefreshImages = document.getElementById("sd-refresh-images");
+if (sdRefreshImages) {
+  sdRefreshImages.addEventListener("click", async () => {
+    sdRefreshImages.disabled = true;
+    const prev = sdRefreshImages.textContent;
+    sdRefreshImages.textContent = "Refreshing…";
+    try {
+      const res = await fetch("/api/streamdeck/refresh-images", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || res.statusText || "Refresh failed");
+      toast("Refreshing Stream Deck images…", "ok");
+      startStreamDeckPoll();
+    } catch (err) {
+      toast("Refresh images failed: " + err.message, "err");
+    } finally {
+      sdRefreshImages.disabled = false;
+      sdRefreshImages.textContent = prev;
     }
   });
 }

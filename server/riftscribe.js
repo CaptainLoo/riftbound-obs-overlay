@@ -1,4 +1,5 @@
 import { writeFile, access } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join, extname } from "node:path";
 import { db } from "./db.js";
 import { CARDS_DIR } from "./paths.js";
@@ -52,8 +53,33 @@ async function downloadImage(url, cardId, suffix) {
  * Ensure a card is present in the local cache: fetches metadata and downloads
  * the full image + a large thumbnail. Returns the cached entry.
  */
+function localAssetExists(localPath) {
+  if (!localPath) return false;
+  const file = localPath.replace(/^\/cards\//, "");
+  return existsSync(join(CARDS_DIR, file));
+}
+
+/** Re-download a card when cache metadata exists but files are missing on disk. */
+export async function repairCardAsset(cardId) {
+  const entry = db.data.cardsCache[cardId];
+  if (entry) {
+    const thumbOk = localAssetExists(entry.thumbLocal);
+    const imageOk = localAssetExists(entry.imageLocal);
+    if (thumbOk || imageOk) return entry;
+    delete db.data.cardsCache[cardId];
+    await db.write();
+  }
+  return cacheCard(cardId);
+}
+
 export async function cacheCard(cardId) {
-  if (db.data.cardsCache[cardId]) return db.data.cardsCache[cardId];
+  const existing = db.data.cardsCache[cardId];
+  if (existing) {
+    if (localAssetExists(existing.thumbLocal) || localAssetExists(existing.imageLocal)) {
+      return existing;
+    }
+    delete db.data.cardsCache[cardId];
+  }
 
   const detail = await fetchCardDetail(cardId);
   const id = detail.id || cardId;
