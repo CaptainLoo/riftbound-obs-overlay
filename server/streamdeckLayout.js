@@ -72,8 +72,8 @@ function enrichSelectGameDef(def, data) {
   const current = data.match?.currentGame ?? 0;
   const active = idx === current;
   def.active = active;
-  const base = String(def.label || "").replace(/^[●]\s*/, "");
-  def.label = active ? `● ${base}` : base;
+  const base = String(def.label || "").replace(/^[▶●]\s*/, "");
+  def.label = active ? `▶ ${base}` : base;
   return def;
 }
 
