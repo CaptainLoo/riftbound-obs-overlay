@@ -161,7 +161,8 @@ npm run dev:electron   # native control window in dev
 3. URL: `http://localhost:7474/overlay`
 4. Width / Height: your canvas resolution (e.g. `1920` × `1080`). Since the layout is in percentages, it adapts to any resolution.
 5. Optionally tick *Refresh browser when scene becomes active*.
-6. (Optional) Add the control panel as a dock: menu **Docks → Custom Browser Docks**, URL `http://localhost:7474/control`.
+6. For smooth matchup animations, set the Browser source to **60 FPS** (source properties → Custom frame rate).
+7. (Optional) Add the control panel as a dock: menu **Docks → Custom Browser Docks**, URL `http://localhost:7474/control`.
 
 The overlay has a transparent background: only the configured elements are shown.
 
