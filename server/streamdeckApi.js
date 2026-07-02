@@ -2,13 +2,14 @@
  * Stream Deck process manager — HID runs in a child process, not in the Electron main/server process.
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
 import { IS_ELECTRON, getContentRoot, getInstallRoot, DATA_DIR } from "./paths.js";
 import { logStartup } from "./startupLog.js";
 
 const STATUS_FILE = join(DATA_DIR, "streamdeck-status.json");
+const QUICK_CLOSE_FLAG = join(DATA_DIR, "streamdeck-quick-close.flag");
 
 let worker = null;
 let workerStarting = false;
@@ -18,6 +19,7 @@ function idleStatus(error = null) {
     supported: platform() === "win32" && IS_ELECTRON,
     connected: false,
     worker: false,
+    phase: "idle",
     error,
     currentPage: 0,
     pageCount: 0,
@@ -92,8 +94,16 @@ export async function startStreamDeckSafe() {
   }
 }
 
-export async function stopStreamDeckSafe() {
+export async function stopStreamDeckSafe({ quickClose = false } = {}) {
   if (!worker) return;
+  if (quickClose) {
+    try {
+      mkdirSync(DATA_DIR, { recursive: true });
+      writeFileSync(QUICK_CLOSE_FLAG, "1", "utf8");
+    } catch (err) {
+      logStartup("[streamdeck] quick-close flag failed", err);
+    }
+  }
   try {
     worker.kill("SIGTERM");
   } catch {
@@ -110,8 +120,8 @@ export async function waitForStreamDeckStatus(timeoutMs = 15000) {
   while (Date.now() < deadline) {
     last = await getStreamDeckStatusSafe();
     if (last.connected) return last;
-    if (last.error && last.worker) return last;
-    if (last.worker && last.lastScanAt) return last;
+    if (last.phase === "error" && last.error) return last;
+    if (!last.worker && last.phase && last.phase !== "idle") return last;
     await new Promise((r) => setTimeout(r, 400));
   }
 
@@ -119,8 +129,8 @@ export async function waitForStreamDeckStatus(timeoutMs = 15000) {
 }
 
 export async function reconnectStreamDeckSafe() {
-  await stopStreamDeckSafe();
-  await new Promise((r) => setTimeout(r, 800));
+  await stopStreamDeckSafe({ quickClose: true });
+  await new Promise((r) => setTimeout(r, 2000));
   await startStreamDeckSafe();
   return waitForStreamDeckStatus(15000);
 }
@@ -141,7 +151,13 @@ export async function getStreamDeckStatusSafe() {
   }
 
   if (workerAlive) {
-    return { ...base, worker: true, error: "Stream Deck worker starting…" };
+    return {
+      ...base,
+      worker: true,
+      phase: "loading",
+      error: null,
+      hint: "Starting Stream Deck worker…",
+    };
   }
 
   return {

@@ -65,6 +65,29 @@ function runElectronNpmCi(contentRoot) {
   });
 }
 
+function runElectronRebuild(contentRoot) {
+  if (process.env.RIFTBOUND_ELECTRON !== "1") return;
+  const electronVer = process.versions.electron;
+  if (!electronVer) {
+    log("Electron version unknown — skipping native rebuild.");
+    return;
+  }
+  const rebuildCli = join(contentRoot, "node_modules", "@electron", "rebuild", "lib", "cli.js");
+  if (!existsSync(rebuildCli)) {
+    log("@electron/rebuild not found — skipping native rebuild (use full installer if Stream Deck fails).");
+    return;
+  }
+  log(`Rebuilding native modules (sharp, node-hid) for Electron ${electronVer}…`);
+  execSync(
+    `"${process.execPath}" "${rebuildCli}" --module-dir "${contentRoot}" --force --only sharp,node-hid --version ${electronVer}`,
+    {
+      cwd: contentRoot,
+      stdio: "inherit",
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    }
+  );
+}
+
 function runNpmCi(nodeRoot, workDir) {
   const nodeExe = join(nodeRoot, "node", "node.exe");
   if (!existsSync(nodeExe)) {
@@ -255,6 +278,7 @@ export async function runPatchApply() {
         runNpmCi(installRoot, contentRoot);
       } else if (process.env.RIFTBOUND_ELECTRON === "1") {
         runElectronNpmCi(contentRoot);
+        runElectronRebuild(contentRoot);
       } else {
         log("Dependencies changed — skip npm ci (use full installer if modules are missing).");
       }

@@ -599,6 +599,25 @@ document.getElementById("show-matchup").addEventListener("click", toggleMatchup)
 let sdPollTimer = null;
 let sdAutoConnectDone = false;
 
+const SD_PHASE_LABELS = {
+  loading: "Loading modules…",
+  scanning: "Scanning for Stream Deck…",
+  opening: "Opening device…",
+  drawing: "Drawing keys…",
+  connected: "Connected",
+  error: "Error",
+  idle: "Waiting…",
+};
+
+function streamDeckPhaseDetail(info) {
+  const phase = info.phase || "idle";
+  const parts = [SD_PHASE_LABELS[phase] || phase];
+  if (info.devicesFound?.length) {
+    parts.push(`${info.devicesFound.length} HID device(s)`);
+  }
+  return parts.join(" · ");
+}
+
 async function renderStreamDeck() {
   const badge = document.getElementById("sd-hid-status");
   const detail = document.getElementById("sd-hid-detail");
@@ -630,28 +649,31 @@ async function renderStreamDeck() {
       if (info.firmwareVersion) parts.push(`FW ${info.firmwareVersion}`);
       detail.textContent = parts.join(" · ");
       if (hint) hint.textContent = info.hint || "";
-    } else if (info.worker && !info.error && !info.lastScanAt) {
-      badge.textContent = "Connecting…";
-      badge.className = "sd-status-badge sd-status-warn";
-      detail.textContent = "Scanning for Stream Deck…";
-      if (hint) hint.textContent = info.hint || "";
-    } else if (info.error) {
+    } else if (info.phase === "error" || (info.error && info.phase !== "loading" && info.phase !== "scanning" && info.phase !== "opening" && info.phase !== "drawing")) {
       badge.textContent = "Error";
       badge.className = "sd-status-badge sd-status-err";
-      detail.textContent = info.error;
+      detail.textContent = info.error || "Stream Deck connection failed.";
       if (info.devicesFound?.length) {
         detail.textContent += ` (HID scan: ${info.devicesFound.length} device(s))`;
       }
       if (hint) {
         hint.textContent =
-          info.hint || "Quit the Elgato Stream Deck app completely, then click Reconnect.";
+          info.hint || "Click Reconnect. If this persists, reinstall Riftbound OBS.";
       }
+    } else if (
+      info.worker ||
+      (info.phase && ["loading", "scanning", "opening", "drawing"].includes(info.phase))
+    ) {
+      badge.textContent = "Connecting…";
+      badge.className = "sd-status-badge sd-status-warn";
+      detail.textContent = streamDeckPhaseDetail(info);
+      if (hint) hint.textContent = info.hint || "Please wait up to 15 seconds…";
     } else {
       badge.textContent = "Not detected";
       badge.className = "sd-status-badge sd-status-warn";
       detail.textContent = info.devicesFound?.length
-        ? `HID scan found ${info.devicesFound.length} device(s).`
-        : "Plug in your Stream Deck and keep Riftbound OBS running.";
+        ? `HID scan found ${info.devicesFound.length} device(s). Click Reconnect.`
+        : "Plug in your Stream Deck and click Reconnect.";
       if (hint) hint.textContent = info.hint || "";
     }
 

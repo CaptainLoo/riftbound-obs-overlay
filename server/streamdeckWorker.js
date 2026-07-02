@@ -1,7 +1,7 @@
 /**
  * Stream Deck HID worker — runs in a separate process so native crashes cannot take down the app.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { DATA_DIR } from "./paths.js";
@@ -9,6 +9,7 @@ import { initDb } from "./db.js";
 import { logStartup } from "./startupLog.js";
 
 const STATUS_FILE = join(DATA_DIR, "streamdeck-status.json");
+const QUICK_CLOSE_FLAG = join(DATA_DIR, "streamdeck-quick-close.flag");
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 
 function writeStatus(status) {
@@ -20,31 +21,72 @@ function writeStatus(status) {
   }
 }
 
+function writeFatalStatus(error) {
+  writeStatus({
+    supported: true,
+    connected: false,
+    phase: "error",
+    worker: true,
+    error: error?.message || String(error),
+  });
+}
+
 async function main() {
   logStartup("[streamdeck-worker] starting");
+  writeStatus({
+    supported: true,
+    connected: false,
+    phase: "loading",
+    worker: true,
+    error: null,
+  });
+
+  process.on("uncaughtException", (err) => {
+    logStartup("[streamdeck-worker] uncaughtException", err);
+    writeFatalStatus(err);
+    process.exit(1);
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    logStartup("[streamdeck-worker] unhandledRejection", reason);
+    writeFatalStatus(reason instanceof Error ? reason : new Error(String(reason)));
+    process.exit(1);
+  });
 
   let startStreamDeck;
   let stopStreamDeck;
   let refreshStreamDeck;
   let getStreamDeckStatus;
+  let setStreamDeckStatusListener;
 
   try {
-    ({ startStreamDeck, stopStreamDeck, refreshStreamDeck, getStreamDeckStatus } =
-      await import("./streamdeckDevice.js"));
+    ({
+      startStreamDeck,
+      stopStreamDeck,
+      refreshStreamDeck,
+      getStreamDeckStatus,
+      setStreamDeckStatusListener,
+    } = await import("./streamdeckDevice.js"));
   } catch (err) {
     logStartup("[streamdeck-worker] module load failed", err);
-    writeStatus({
-      supported: true,
-      connected: false,
-      error: `Stream Deck module failed to load: ${err.message || err}. Try reinstalling Riftbound OBS.`,
-    });
+    writeFatalStatus(
+      new Error(
+        `Stream Deck module failed to load: ${err.message || err}. Try reinstalling Riftbound OBS.`
+      )
+    );
     process.exit(1);
   }
+
+  setStreamDeckStatusListener((s) => writeStatus(s));
 
   const publishStatus = () => writeStatus(getStreamDeckStatus());
 
   const shutdown = async (code = 0) => {
     try {
+      if (existsSync(QUICK_CLOSE_FLAG)) {
+        process.env.RIFTBOUND_SD_QUICK_CLOSE = "1";
+        rmSync(QUICK_CLOSE_FLAG, { force: true });
+      }
       await stopStreamDeck();
     } catch {
       /* ignore */
@@ -57,15 +99,12 @@ async function main() {
 
   try {
     logStartup("[streamdeck-worker] initDb…");
+    writeStatus({ ...getStreamDeckStatus(), phase: "loading", error: null });
     await initDb();
     logStartup("[streamdeck-worker] initDb OK");
   } catch (err) {
     logStartup("[streamdeck-worker] initDb failed", err);
-    writeStatus({
-      supported: true,
-      connected: false,
-      error: `Database init failed: ${err.message || err}`,
-    });
+    writeFatalStatus(new Error(`Database init failed: ${err.message || err}`));
     process.exit(1);
   }
 
@@ -75,11 +114,7 @@ async function main() {
     logStartup(`[streamdeck-worker] device init done — ${JSON.stringify(getStreamDeckStatus())}`);
   } catch (err) {
     logStartup("[streamdeck-worker] init failed", err);
-    writeStatus({
-      supported: true,
-      connected: false,
-      error: err.message || String(err),
-    });
+    writeFatalStatus(err);
     process.exit(1);
   }
 
@@ -123,23 +158,6 @@ async function main() {
 
 main().catch((err) => {
   logStartup("[streamdeck-worker] fatal", err);
-  try {
-    writeFileSync(
-      STATUS_FILE,
-      `${JSON.stringify(
-        {
-          supported: true,
-          connected: false,
-          worker: true,
-          error: err.message || String(err),
-        },
-        null,
-        2
-      )}\n`,
-      "utf8"
-    );
-  } catch {
-    /* ignore */
-  }
+  writeFatalStatus(err);
   process.exit(1);
 });

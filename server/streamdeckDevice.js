@@ -8,6 +8,7 @@ const API = `http://127.0.0.1:${DEFAULT_PORT}/api`;
 
 let nodeLib = null;
 let imagesMod = null;
+let statusListener = null;
 
 async function loadNodeLib() {
   if (!nodeLib) {
@@ -33,6 +34,7 @@ let refreshInFlight = false;
 let status = {
   supported: platform() === "win32" && IS_ELECTRON,
   connected: false,
+  phase: "idle",
   model: null,
   productName: null,
   serialNumber: null,
@@ -48,6 +50,11 @@ let status = {
 
 function setStatus(patch) {
   status = { ...status, ...patch };
+  statusListener?.(getStreamDeckStatus());
+}
+
+export function setStreamDeckStatusListener(fn) {
+  statusListener = fn;
 }
 
 function formatError(err) {
@@ -56,6 +63,22 @@ function formatError(err) {
     return "Stream Deck busy — quit the Elgato Stream Deck app completely, then restart Riftbound OBS.";
   }
   return msg;
+}
+
+export async function preflightNativeModules() {
+  setStatus({ phase: "loading", error: null, connected: false });
+  try {
+    await import("@elgato-stream-deck/node");
+    await import("sharp");
+    return true;
+  } catch (err) {
+    setStatus({
+      phase: "error",
+      connected: false,
+      error: `Stream Deck native module failed to load: ${formatError(err)}. Reinstall Riftbound OBS.`,
+    });
+    throw err;
+  }
 }
 
 function apiUrl(path) {
@@ -157,12 +180,16 @@ async function handleKeyAction(keyDef, keyIndex) {
 }
 
 async function drawCurrentPage() {
-  if (!deck || !pages.length) return;
+  if (!deck || !pages.length) return { drawn: 0, failed: 0 };
   const page = pages[currentPageIndex];
-  if (!page) return;
+  if (!page) return { drawn: 0, failed: 0 };
 
   const controls = deck.CONTROLS.filter((c) => c.type === "button");
   const validIndices = new Set(controls.map((c) => c.index));
+  const expectedBytes = keySize * keySize * 3;
+  let drawn = 0;
+  let failed = 0;
+  let firstError = null;
 
   for (const idx of validIndices) {
     if (!page.keys.has(idx)) {
@@ -175,11 +202,27 @@ async function drawCurrentPage() {
     try {
       const { renderKeyImage } = await loadImagesMod();
       const rgb = await renderKeyImage(keyDef, db.data.cardsCache, keySize);
+      if (rgb.length !== expectedBytes) {
+        throw new Error(`expected ${expectedBytes} bytes, got ${rgb.length}`);
+      }
       await deck.fillKeyBuffer(idx, rgb, { format: "rgb" });
+      drawn += 1;
     } catch (err) {
+      failed += 1;
+      if (!firstError) firstError = err;
       console.error(`[streamdeck] Key ${idx} draw failed:`, err.message);
     }
   }
+
+  if (drawn === 0 && page.keys.size > 0) {
+    throw new Error(
+      firstError
+        ? `Key image render failed: ${formatError(firstError)}`
+        : "Key image render failed — reinstall Riftbound OBS."
+    );
+  }
+
+  return { drawn, failed };
 }
 
 async function rebuildPages(resetPage = false) {
@@ -206,10 +249,10 @@ export async function refreshStreamDeck(force = false) {
       clearImageCaches();
     }
     await rebuildPages(false);
-    setStatus({ error: null });
+    setStatus({ error: null, phase: "connected" });
   } catch (err) {
     console.error("[streamdeck] Refresh failed:", err);
-    setStatus({ error: formatError(err) });
+    setStatus({ error: formatError(err), phase: "error" });
   } finally {
     refreshInFlight = false;
   }
@@ -232,6 +275,7 @@ function sleep(ms) {
 }
 
 async function scanStreamDecks(maxAttempts = 6, delayMs = 1500) {
+  setStatus({ phase: "scanning", error: null });
   const { listStreamDecks } = await loadNodeLib();
   let lastErr = null;
   let devices = [];
@@ -268,22 +312,26 @@ async function scanStreamDecks(maxAttempts = 6, delayMs = 1500) {
 
 export async function startStreamDeck() {
   if (!status.supported) {
-    setStatus({ connected: false, error: null });
+    setStatus({ connected: false, error: null, phase: "idle" });
     return;
   }
   if (deck) return;
 
   try {
+    await preflightNativeModules();
     const { DeviceModelId, openStreamDeck } = await loadNodeLib();
     const devices = await scanStreamDecks();
     if (!devices.length) {
       setStatus({
         connected: false,
+        phase: "error",
         error:
-          "No Stream Deck detected. Quit the Elgato Stream Deck app (check system tray and Task Manager for StreamDeck.exe), then click Reconnect.",
+          "No Stream Deck detected. Plug in your device, then click Reconnect.",
       });
       return;
     }
+
+    setStatus({ phase: "opening", error: null });
 
     const preferred =
       devices.find((d) => d.model === DeviceModelId.XL) ||
@@ -297,7 +345,7 @@ export async function startStreamDeck() {
 
     deck.on("error", (err) => {
       console.error("[streamdeck] Device error:", err);
-      setStatus({ error: formatError(err), connected: false });
+      setStatus({ error: formatError(err), connected: false, phase: "error" });
     });
 
     deck.on("down", (control) => {
@@ -321,7 +369,6 @@ export async function startStreamDeck() {
     pages = buildPages(db.data, deviceKey);
 
     setStatus({
-      connected: true,
       error: null,
       model: preferred.model,
       productName: deck.PRODUCT_NAME,
@@ -331,15 +378,24 @@ export async function startStreamDeck() {
       pageCount: pages.length,
       pageNames: pages.map((p) => p.name),
       currentPage: 0,
+      phase: "drawing",
+      connected: false,
     });
 
     await drawCurrentPage();
+
+    setStatus({
+      connected: true,
+      phase: "connected",
+    });
+
     console.log(`[streamdeck] Connected: ${deck.PRODUCT_NAME} (${pages.length} pages)`);
   } catch (err) {
     console.error("[streamdeck] Failed to open device:", err);
     deck = null;
     setStatus({
       connected: false,
+      phase: "error",
       error: formatError(err),
       pageCount: 0,
       pageNames: [],
@@ -351,8 +407,12 @@ export async function stopStreamDeck() {
   clearTimeout(refreshTimer);
   if (!deck) return;
   try {
-    await deck.resetToLogo();
-    await deck.close();
+    if (process.env.RIFTBOUND_SD_QUICK_CLOSE === "1") {
+      await deck.close();
+    } else {
+      await deck.resetToLogo();
+      await deck.close();
+    }
   } catch (err) {
     console.error("[streamdeck] Close error:", err);
   }
@@ -361,6 +421,7 @@ export async function stopStreamDeck() {
   currentPageIndex = 0;
   setStatus({
     connected: false,
+    phase: "idle",
     model: null,
     productName: null,
     serialNumber: null,
