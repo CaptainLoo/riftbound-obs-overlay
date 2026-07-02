@@ -85,6 +85,18 @@ writeFileSync(manifestPath, `${JSON.stringify(updateManifest, null, 2)}\n`, "utf
 const tag = `v${version}`;
 console.log(`\nCreating GitHub release ${tag} on ${repo}…`);
 
+if (!noBump) {
+  try {
+    execSync("git diff --quiet package.json", { cwd: ROOT, stdio: "ignore" });
+  } catch {
+    execSync(`git add package.json && git commit -m "Release ${tag}."`, {
+      cwd: ROOT,
+      stdio: "inherit",
+    });
+    execSync("git push origin HEAD", { cwd: ROOT, stdio: "inherit" });
+  }
+}
+
 const assets = [`"${patchZip}"`, `"${manifestPath}"`];
 if (existsSync(fullZip)) {
   assets.splice(1, 0, `"${fullZip}"`);
