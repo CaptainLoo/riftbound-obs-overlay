@@ -1,6 +1,6 @@
 {
   "name": "riftbound-obs-overlay",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Riftbound stream overlay for OBS (Browser Source) with web control panel.",
   "type": "module",
   "main": "electron/main.cjs",
