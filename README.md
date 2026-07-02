@@ -72,7 +72,7 @@ Develop on macOS, stream on Windows with **in-app updates** (light ~1 MB patch b
 1. Download **`riftbound-setup-X.Y.Z.exe`** from [GitHub Releases](https://github.com/CaptainLoo/riftbound-obs-overlay/releases).
 2. Run the installer (per-user, no admin required).
 3. Launch **Riftbound OBS** from the desktop shortcut or Start menu.
-4. Updates use a **hybrid channel**: small patches for app code, silent full installer when the Electron runtime changes or `forceFull` is set in the manifest.
+4. Updates use a **hybrid patch-first channel** on the Electron app: the ~1 MB patch zip is available **immediately** after each release (no need to wait for the CI-built `.exe`). The full installer is used only when `forceFull` is set (Electron runtime bump or native dependency changes).
 
 ### Legacy: portable zip (pre-Electron)
 
@@ -113,7 +113,7 @@ Then pushes git tag `vX.Y.Z` → CI attaches within a few minutes:
 - `riftbound-obs-windows.zip` (portable Electron build)
 - updated `update-manifest.json` (with installer SHA256)
 
-Options: `npm run publish -- minor`, `npm run publish -- --no-bump`, `npm run publish -- --notes="Fix overlay"`.
+Options: `npm run publish -- minor`, `npm run publish -- --no-bump`, `npm run publish -- --notes="Fix overlay"`, `npm run publish -- --force-full` (require full installer — use when Electron or native deps change).
 
 Build commands:
 

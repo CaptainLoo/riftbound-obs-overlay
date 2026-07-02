@@ -189,6 +189,10 @@ function resolveUpdateMode(manifest, currentVersion) {
   if (compareSemver(manifest.version, currentVersion) <= 0) return null;
 
   if (IS_ELECTRON) {
+    if (manifest.forceFull) {
+      return manifest.installer?.url || manifest.installer?.file ? "installer" : null;
+    }
+    if (manifest.patch?.url || manifest.patch?.file) return "patch";
     if (manifest.installer?.url || manifest.installer?.file) return "installer";
     return null;
   }
@@ -299,7 +303,7 @@ export async function checkForUpdate() {
   let updateMode = updateAvailable ? resolveUpdateMode(manifest, currentVersion) : null;
   let updateBlockedReason = null;
 
-  if (updateAvailable && IS_ELECTRON && !updateMode) {
+  if (updateAvailable && IS_ELECTRON && !updateMode && manifest.forceFull) {
     updateBlockedReason = INSTALLER_CI_MESSAGE;
   }
 
@@ -316,7 +320,7 @@ export async function checkForUpdate() {
     installType: getInstallType(),
     nodeVersion: getBundledNodeVersion(),
     notes: manifest.notes || "",
-    patch: IS_ELECTRON ? null : manifest.patch || null,
+    patch: manifest.patch || null,
     installer: manifest.installer || null,
     full: manifest.full || null,
     forceFull: Boolean(manifest.forceFull),

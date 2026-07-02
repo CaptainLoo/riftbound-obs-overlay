@@ -1232,16 +1232,18 @@ let updateDismissedVersion = null;
 let updateDismissedFailureAt = null;
 
 function formatUpdateSize(state) {
-  if (state.installType === "electron" || state.updateMode === "installer") {
+  if (state.updateMode === "patch") {
+    return "~1 MB (light patch — available immediately)";
+  }
+  if (state.updateMode === "installer" || state.forceFull) {
     if (state.installer?.size) {
       const mb = Math.round(state.installer.size / (1024 * 1024));
       return `~${mb} MB (full installer)`;
     }
     return "~80 MB (full installer)";
   }
-  if (state.updateMode === "installer" && state.installer?.size) {
-    const mb = Math.round(state.installer.size / (1024 * 1024));
-    return `~${mb} MB (full installer)`;
+  if (state.installType === "electron") {
+    return "~1 MB (light patch)";
   }
   return "~1 MB (light patch)";
 }
@@ -1252,6 +1254,9 @@ function formatApplyPhase(phase) {
     shutting_down: "Shutting down",
     spawned: "Starting updater",
     waiting_app_exit: "Waiting for app to exit",
+    extracting: "Extracting patch",
+    applying: "Applying patch",
+    rebuilding: "Rebuilding native modules",
     running_installer: "Running installer",
     restarting: "Restarting",
     success: "Complete",
@@ -1301,7 +1306,10 @@ function setUpdateUi(state) {
     if (state.downloaded?.ready) {
       updateApplyBtn.disabled = false;
       updateTitle.textContent = `Update v${state.downloaded.version} ready (retry)`;
-      updateDetail.textContent = "Installer downloaded. Click Install & restart to retry.";
+      updateDetail.textContent =
+        state.downloaded.mode === "installer"
+          ? "Installer downloaded. Click Install & restart to retry."
+          : "Patch downloaded. Click Install & restart to retry.";
     }
     return;
   }
@@ -1331,8 +1339,16 @@ function setUpdateUi(state) {
   if (updateLogBtn) updateLogBtn.classList.toggle("hidden", !state.logPath);
 
   if (state.installType === "electron") {
-    updateNotes.textContent =
-      "Electron app updates use the full installer for reliability. User data in %APPDATA%\\RiftboundOBS is preserved.";
+    if (state.updateMode === "patch") {
+      updateNotes.textContent =
+        "Patch updates (~1 MB) are available immediately — no need to wait for the full installer.";
+    } else if (state.forceFull) {
+      updateNotes.textContent =
+        "This release requires the full installer (Electron or native module change). User data in %APPDATA%\\RiftboundOBS is preserved.";
+    } else {
+      updateNotes.textContent =
+        "User data in %APPDATA%\\RiftboundOBS is preserved during updates.";
+    }
     updateNotes.classList.remove("hidden");
   } else if (state.installType === "portable" && state.installer) {
     updateNotes.textContent =
@@ -1349,9 +1365,11 @@ function setUpdateUi(state) {
     setUpdateProgress(null);
   } else if (state.updateAvailable) {
     const modeLabel =
-      state.updateMode === "installer" || state.installType === "electron"
-        ? "Full installer update"
-        : "Patch update";
+      state.updateMode === "patch"
+        ? "Patch update (available immediately)"
+        : state.updateMode === "installer" || state.forceFull
+          ? "Full installer update"
+          : "Update";
     updateTitle.textContent = `${modeLabel}: v${state.latestVersion} available`;
     if (state.updateBlockedReason) {
       updateDetail.textContent = state.updateBlockedReason;

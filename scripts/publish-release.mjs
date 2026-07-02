@@ -3,7 +3,7 @@
  * Bump version, build patch + full Windows release + installer, publish to GitHub Releases.
  */
 import { execSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ROOT,
@@ -16,7 +16,65 @@ import {
 
 const args = process.argv.slice(2);
 const noBump = args.includes("--no-bump");
+const forceFull = args.includes("--force-full");
 const bumpPart = args.find((a) => ["major", "minor", "patch"].includes(a)) || "patch";
+
+const NATIVE_PACKAGES = [
+  "sharp",
+  "node-hid",
+  "@elgato-stream-deck/node",
+  "@julusian/jpeg-turbo",
+];
+
+function readJsonFromGit(path, ref) {
+  try {
+    const raw = execSync(`git show ${ref}:${path}`, { cwd: ROOT, encoding: "utf8" });
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function lockVersionForPackage(lockContent, pkgName) {
+  if (!lockContent) return null;
+  const escaped = pkgName.replace("/", "\\/");
+  const re = new RegExp(`"node_modules/${escaped}"[^}]*"version":\\s*"([^"]+)"`);
+  return lockContent.match(re)?.[1] || null;
+}
+
+function detectNativeReleaseChanges() {
+  let prevTag = null;
+  try {
+    prevTag = execSync("git describe --tags --abbrev=0 HEAD~1 2>/dev/null", {
+      cwd: ROOT,
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return { electronChanged: false, nativeChanged: [], prevTag: null };
+  }
+  if (!prevTag) return { electronChanged: false, nativeChanged: [], prevTag: null };
+
+  const currentPkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const prevPkg = readJsonFromGit("package.json", prevTag) || {};
+  const electronKey = (pkg) => pkg.devDependencies?.electron || pkg.dependencies?.electron;
+  const electronChanged = electronKey(currentPkg) !== electronKey(prevPkg);
+
+  const currentLock = readFileSync(join(ROOT, "package-lock.json"), "utf8");
+  let prevLock = "";
+  try {
+    prevLock = execSync(`git show ${prevTag}:package-lock.json`, { cwd: ROOT, encoding: "utf8" });
+  } catch {
+    prevLock = "";
+  }
+
+  const nativeChanged = NATIVE_PACKAGES.filter((pkg) => {
+    const cur = lockVersionForPackage(currentLock, pkg);
+    const prev = lockVersionForPackage(prevLock, pkg);
+    return cur && prev && cur !== prev;
+  });
+
+  return { electronChanged, nativeChanged, prevTag };
+}
 
 if (!noBump) {
   const next = bumpVersion(bumpPart);
@@ -30,6 +88,26 @@ if (!repo || repo.includes("REPLACE")) {
     'Configure package.json → riftbound.updateRepo (e.g. "yourname/riftbound-obs-overlay") before publishing.'
   );
   process.exit(1);
+}
+
+const nativeChanges = detectNativeReleaseChanges();
+const shouldForceFull = forceFull;
+
+if (nativeChanges.electronChanged || nativeChanges.nativeChanged.length) {
+  console.log(
+    `\nNative/Electron changes since ${nativeChanges.prevTag || "previous tag"}:` +
+      `${nativeChanges.electronChanged ? " electron" : ""}` +
+      `${nativeChanges.nativeChanged.length ? ` ${nativeChanges.nativeChanged.join(", ")}` : ""}`
+  );
+}
+
+if (!forceFull && (nativeChanges.electronChanged || nativeChanges.nativeChanged.length)) {
+  console.warn(
+    "\nWARNING: Electron or native dependency versions changed since the last tag.\n" +
+      "Consider publishing with --force-full so users get the full installer instead of a patch.\n"
+  );
+} else if (forceFull) {
+  console.log("\nforceFull enabled via --force-full\n");
 }
 
 console.log("\nBuilding patch…");
@@ -63,7 +141,7 @@ const updateManifest = {
   releasedAt: new Date().toISOString(),
   notes,
   nodeVersion: getManifestNodeVersion(),
-  forceFull: false,
+  forceFull: shouldForceFull,
   minPatchFrom: "0.1.0",
   patch: {
     file: `riftbound-obs-patch-${version}.zip`,
@@ -79,6 +157,7 @@ writeFileSync(manifestPath, `${JSON.stringify(updateManifest, null, 2)}\n`, "utf
 
 const tag = `v${version}`;
 console.log(`\nCreating GitHub release ${tag} on ${repo}…`);
+console.log(`Manifest forceFull: ${shouldForceFull}\n`);
 
 if (!noBump) {
   try {

@@ -15,6 +15,7 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnAppLauncher, resolvePatchTargetRoot } from "./launcher.js";
+import { readAppPid, sleep, waitForProcessExit } from "./update-shutdown.js";
 import {
   acquireLock,
   log,
@@ -23,15 +24,12 @@ import {
   releaseLock,
   sha256File,
   updatesDir,
+  writeApplyStatus,
 } from "./update-utils.js";
 
 function normalizePath(p) {
   if (!p || typeof p !== "string") return process.cwd();
   return p.replace(/^["']+|["']+$/g, "").replace(/[\\/]+$/, "");
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function expandZip(zipPath, destDir) {
@@ -211,12 +209,20 @@ function restartApp(installRoot) {
   log(`App launcher not found in ${installRoot}`);
 }
 
+function resolveParentPid(pending) {
+  const fromEnv = parseInt(process.env.RIFTBOUND_UPDATE_PARENT_PID || "", 10);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  if (pending?.parentPid) return pending.parentPid;
+  return readAppPid();
+}
+
 async function main() {
   await runPatchApply();
 }
 
 export async function runPatchApply() {
   acquireLock("patch-apply");
+  let pending = null;
   try {
     mkdirSync(updatesDir(), { recursive: true });
     writeFileSync(logPath(), `[${new Date().toISOString()}] --- patch update start ---\n`, "utf8");
@@ -226,37 +232,58 @@ export async function runPatchApply() {
       process.exit(1);
     }
 
-    const pending = JSON.parse(readFileSync(pendingPath(), "utf8"));
+    pending = JSON.parse(readFileSync(pendingPath(), "utf8"));
     if (pending.mode === "installer") {
       log("Pending update is installer mode — use update-router.js");
       process.exit(1);
     }
+
+    writeApplyStatus({
+      phase: "waiting_app_exit",
+      version: pending.version,
+      mode: "patch",
+      message: "Waiting for app to exit…",
+      error: null,
+    });
+
+    const parentPid = resolveParentPid(pending);
+    log(`Waiting for parent process ${parentPid || "(unknown)"} to exit…`);
+    const exited = await waitForProcessExit(parentPid, 60000);
+    if (!exited) {
+      throw new Error(`App process ${parentPid} did not exit within 60 seconds.`);
+    }
+    await sleep(1500);
 
     const installRoot = normalizePath(pending.installRoot || process.cwd());
     const contentRoot = resolvePatchTargetRoot(installRoot);
     log(`Install root: ${installRoot}`);
     log(`Content root: ${contentRoot}`);
     if (!existsSync(installRoot)) {
-      log(`Install folder not found: ${installRoot}`);
-      process.exit(1);
+      throw new Error(`Install folder not found: ${installRoot}`);
     }
 
     const zipPath = pending.patchZip;
     if (!existsSync(zipPath)) {
-      log(`Patch zip not found: ${zipPath}`);
-      process.exit(1);
+      throw new Error(`Patch zip not found: ${zipPath}`);
     }
 
     if (pending.sha256) {
       const hash = await sha256File(zipPath);
       if (hash !== pending.sha256) {
-        log("SHA256 mismatch — aborting.");
-        process.exit(1);
+        throw new Error("SHA256 mismatch — aborting.");
       }
     }
 
     const extractDir = join(updatesDir(), "extract");
     rmSync(extractDir, { recursive: true, force: true });
+
+    writeApplyStatus({
+      phase: "extracting",
+      version: pending.version,
+      mode: "patch",
+      message: "Extracting patch…",
+      error: null,
+    });
     log("Extracting patch…");
     expandZip(zipPath, extractDir);
 
@@ -268,19 +295,41 @@ export async function runPatchApply() {
     const depsChanged = Boolean(newLock && newLock !== oldLock);
 
     const stagingRoot = prepareStaging(extractDir, installRoot);
+
+    writeApplyStatus({
+      phase: "applying",
+      version: pending.version,
+      mode: "patch",
+      message: "Applying patch files…",
+      error: null,
+    });
     log(`Applying staged update to ${contentRoot}`);
     await applyStaging(stagingRoot, installRoot, contentRoot);
 
     if (depsChanged) {
-      const nodeExe = join(installRoot, "node", "node.exe");
-      if (existsSync(nodeExe)) {
-        log("Dependencies changed — running npm ci…");
-        runNpmCi(installRoot, contentRoot);
-      } else if (process.env.RIFTBOUND_ELECTRON === "1") {
-        runElectronNpmCi(contentRoot);
-        runElectronRebuild(contentRoot);
-      } else {
-        log("Dependencies changed — skip npm ci (use full installer if modules are missing).");
+      writeApplyStatus({
+        phase: "rebuilding",
+        version: pending.version,
+        mode: "patch",
+        message: "Rebuilding native modules…",
+        error: null,
+      });
+      try {
+        const nodeExe = join(installRoot, "node", "node.exe");
+        if (existsSync(nodeExe)) {
+          log("Dependencies changed — running npm ci…");
+          runNpmCi(installRoot, contentRoot);
+        } else if (process.env.RIFTBOUND_ELECTRON === "1") {
+          runElectronNpmCi(contentRoot);
+          runElectronRebuild(contentRoot);
+        } else {
+          log("Dependencies changed — skip npm ci (use full installer if modules are missing).");
+        }
+      } catch (rebuildErr) {
+        log(`Native rebuild failed: ${rebuildErr.message}`);
+        throw new Error(
+          `Native module rebuild failed — install riftbound-setup-${pending.version}.exe from GitHub Releases instead.`
+        );
       }
     }
 
@@ -291,10 +340,34 @@ export async function runPatchApply() {
       JSON.stringify({ version: pending.version, mode: "patch", appliedAt: new Date().toISOString() }, null, 2)
     );
 
+    writeApplyStatus({
+      phase: "restarting",
+      version: pending.version,
+      mode: "patch",
+      message: "Restarting app…",
+      error: null,
+    });
+
     log(`Update applied successfully (v${pending.version}).`);
+    await sleep(1000);
     if (pending.restart) restartApp(installRoot);
+
+    writeApplyStatus({
+      phase: "success",
+      version: pending.version,
+      mode: "patch",
+      message: `Updated to v${pending.version}.`,
+      error: null,
+    });
   } catch (err) {
     log(`Update failed: ${err.stack || err.message}`);
+    writeApplyStatus({
+      phase: "failed",
+      version: pending?.version,
+      mode: "patch",
+      message: err.message,
+      error: err.message,
+    });
     process.exitCode = 1;
     throw err;
   } finally {

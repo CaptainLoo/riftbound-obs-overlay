@@ -40,10 +40,6 @@ export async function runUpdatePreflight(applyTokenFromClient = null) {
     );
   }
 
-  if (IS_ELECTRON && pending.mode !== "installer") {
-    errors.push("Electron app requires a full installer update. Re-download the update.");
-  }
-
   const installRoot = (pending.installRoot || getInstallRoot()).replace(/[\\/]+$/, "");
   if (!existsSync(installRoot)) {
     errors.push(`Install folder not found: ${installRoot}`);
