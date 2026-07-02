@@ -59,6 +59,7 @@ const icons = {
   "action-show": [63, 185, 100],
   "action-hide": [226, 87, 76],
   "action-matchup": [255, 193, 7],
+  "action-reset": [255, 120, 80],
   "action-win": [156, 136, 255],
   "action-game": [79, 168, 204],
 };

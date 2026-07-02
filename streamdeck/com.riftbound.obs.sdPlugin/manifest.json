@@ -58,6 +58,14 @@
       "States": [{ "Image": "imgs/action-matchup", "TitleAlignment": "bottom", "FontSize": 10 }]
     },
     {
+      "Name": "Reset Match",
+      "UUID": "com.riftbound.obs.resetmatch",
+      "Icon": "imgs/action-reset",
+      "Tooltip": "Reset scores, current game and per-game selections (keeps decks).",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/action-reset", "TitleAlignment": "bottom", "FontSize": 10 }]
+    },
+    {
       "Name": "Win Game",
       "UUID": "com.riftbound.obs.wingame",
       "Icon": "imgs/action-win",

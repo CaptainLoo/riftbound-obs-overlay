@@ -6622,6 +6622,17 @@ var Matchup = class extends SingletonAction {
 Matchup = __decorateClass([
   action({ UUID: "com.riftbound.obs.matchup" })
 ], Matchup);
+var ResetMatch = class extends SingletonAction {
+  async onKeyDown(ev) {
+    await runKeyAction(
+      ev,
+      () => apiPost("/api/match/reset", settings2(ev.payload.settings), {}).then(() => void 0)
+    );
+  }
+};
+ResetMatch = __decorateClass([
+  action({ UUID: "com.riftbound.obs.resetmatch" })
+], ResetMatch);
 var WinGame = class extends SingletonAction {
   async onKeyDown(ev) {
     const player = ev.payload.settings.player || "p1";
@@ -6737,6 +6748,7 @@ streamDeck.actions.registerAction(new ShowCard());
 streamDeck.actions.registerAction(new HideAll());
 streamDeck.actions.registerAction(new HidePlayer());
 streamDeck.actions.registerAction(new Matchup());
+streamDeck.actions.registerAction(new ResetMatch());
 streamDeck.actions.registerAction(new WinGame());
 streamDeck.actions.registerAction(new SelectGame());
 streamDeck.actions.registerAction(new SetBattlefield());

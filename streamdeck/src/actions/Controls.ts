@@ -37,6 +37,15 @@ export class Matchup extends SingletonAction<{ host?: string; port?: number }> {
   }
 }
 
+@action({ UUID: "com.riftbound.obs.resetmatch" })
+export class ResetMatch extends SingletonAction<{ host?: string; port?: number }> {
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    await runKeyAction(ev, () =>
+      apiPost("/api/match/reset", settings(ev.payload.settings), {}).then(() => undefined)
+    );
+  }
+}
+
 @action({ UUID: "com.riftbound.obs.wingame" })
 export class WinGame extends SingletonAction<PlayerSettings> {
   override async onKeyDown(ev: KeyDownEvent<PlayerSettings>): Promise<void> {

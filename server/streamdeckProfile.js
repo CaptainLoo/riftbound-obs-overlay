@@ -18,6 +18,7 @@ const PLUGIN = {
   hideall: "com.riftbound.obs.hideall",
   hideplayer: "com.riftbound.obs.hideplayer",
   matchup: "com.riftbound.obs.matchup",
+  resetmatch: "com.riftbound.obs.resetmatch",
   wingame: "com.riftbound.obs.wingame",
   game: "com.riftbound.obs.game",
   battlefield: "com.riftbound.obs.battlefield",
@@ -131,11 +132,12 @@ function buildControlPage(device, data, baseSettings) {
     // XL layout — full controls + all battlefields + navigation
     put(0, 0, PLUGIN.hideall, "Hide all", { ...baseSettings }, "Hide all");
     put(1, 0, PLUGIN.matchup, "Matchup", { ...baseSettings }, "Matchup");
-    put(2, 0, PLUGIN.game, "Game 1", { ...baseSettings, index: 0 }, "Game 1");
-    put(3, 0, PLUGIN.game, "Game 2", { ...baseSettings, index: 1 }, "Game 2");
-    put(4, 0, PLUGIN.game, "Game 3", { ...baseSettings, index: 2 }, "Game 3");
-    put(5, 0, PLUGIN.wingame, "P1 win", { ...baseSettings, player: "p1" }, "P1 Win");
-    put(6, 0, PLUGIN.wingame, "P2 win", { ...baseSettings, player: "p2" }, "P2 Win");
+    put(2, 0, PLUGIN.resetmatch, "Reset Match", { ...baseSettings }, "Reset");
+    put(3, 0, PLUGIN.game, "Game 1", { ...baseSettings, index: 0 }, "Game 1");
+    put(4, 0, PLUGIN.game, "Game 2", { ...baseSettings, index: 1 }, "Game 2");
+    put(5, 0, PLUGIN.game, "Game 3", { ...baseSettings, index: 2 }, "Game 3");
+    put(6, 0, PLUGIN.wingame, "P1 win", { ...baseSettings, player: "p1" }, "P1 Win");
+    put(7, 0, PLUGIN.wingame, "P2 win", { ...baseSettings, player: "p2" }, "P2 Win");
     put(0, 1, PLUGIN.hideplayer, "Hide P1", { ...baseSettings, player: "p1" }, "Hide P1");
     put(1, 1, PLUGIN.hideplayer, "Hide P2", { ...baseSettings, player: "p2" }, "Hide P2");
     put(2, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p1", delta: 1 }, "P1 +");
@@ -169,7 +171,8 @@ function buildControlPage(device, data, baseSettings) {
     put(2, 0, PLUGIN.game, "Game 1", { ...baseSettings, index: 0 }, "G1");
     put(3, 0, PLUGIN.game, "Game 2", { ...baseSettings, index: 1 }, "G2");
     put(4, 0, PLUGIN.game, "Game 3", { ...baseSettings, index: 2 }, "G3");
-    put(0, 1, PLUGIN.wingame, "P1 win", { ...baseSettings, player: "p1" }, "P1 Win");
+    put(0, 1, PLUGIN.resetmatch, "Reset Match", { ...baseSettings }, "Reset");
+    put(1, 1, PLUGIN.wingame, "P1 win", { ...baseSettings, player: "p1" }, "P1 Win");
     put(1, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p1", delta: 1 }, "P1 +");
     put(2, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p1", delta: -1 }, "P1 −");
     put(3, 1, PLUGIN.gamepoint, "Game Point", { ...baseSettings, player: "p2", delta: 1 }, "P2 +");
@@ -194,8 +197,8 @@ function buildControlPage(device, data, baseSettings) {
   } else {
     // Mini 3×2 — essentials only
     put(0, 0, PLUGIN.hideall, "Hide all", { ...baseSettings }, "Hide");
-    put(1, 0, PLUGIN.matchup, "Matchup", { ...baseSettings }, "Matchup");
-    put(2, 0, PLUGIN.game, "Game 1", { ...baseSettings, index: 0 }, "G1");
+    put(1, 0, PLUGIN.resetmatch, "Reset Match", { ...baseSettings }, "Reset");
+    put(2, 0, PLUGIN.matchup, "Matchup", { ...baseSettings }, "Matchup");
     put(1, 1, PLUGIN.wingame, "P1 win", { ...baseSettings, player: "p1" }, "P1");
   }
 
