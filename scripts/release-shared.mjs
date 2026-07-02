@@ -90,10 +90,13 @@ timeout /t 8 /nobreak >nul
 set ELECTRON_RUN_AS_NODE=1
 set RIFTBOUND_ELECTRON=1
 set RIFTBOUND_INSTALL_ROOT=%~dp0
-if exist "%~dp0resources\\updater\\bootstrap.js" (
+if exist "%~dp0resources\\riftbound\\server\\update-router.js" (
+  "%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
+) else if exist "%~dp0resources\\updater\\bootstrap.js" (
   "%~dp0Riftbound OBS.exe" "%~dp0resources\\updater\\bootstrap.js"
 ) else (
-  "%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
+  echo Update scripts not found in install folder.
+  exit /b 1
 )
 if errorlevel 1 (
   echo.

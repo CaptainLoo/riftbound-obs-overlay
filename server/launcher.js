@@ -11,10 +11,13 @@ timeout /t 8 /nobreak >nul
 set ELECTRON_RUN_AS_NODE=1
 set RIFTBOUND_ELECTRON=1
 set RIFTBOUND_INSTALL_ROOT=%~dp0
-if exist "%~dp0resources\\updater\\bootstrap.js" (
+if exist "%~dp0resources\\riftbound\\server\\update-router.js" (
+  "%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
+) else if exist "%~dp0resources\\updater\\bootstrap.js" (
   "%~dp0Riftbound OBS.exe" "%~dp0resources\\updater\\bootstrap.js"
 ) else (
-  "%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
+  echo Update scripts not found in install folder.
+  exit /b 1
 )
 if errorlevel 1 (
   echo.
@@ -74,6 +77,28 @@ export function ensureElectronUpdateBat(installRoot) {
 
 export function spawnPatchUpdate(installRoot, { spawnFn, isElectron = false }) {
   const normalized = installRoot.replace(/[\\/]+$/, "");
+
+  if (isElectron) {
+    const exe = join(normalized, APP_EXE_NAME);
+    const router = join(normalized, "resources", "riftbound", "server", "update-router.js");
+    if (existsSync(exe) && existsSync(router)) {
+      const inner = [
+        "timeout /t 8 /nobreak >nul",
+        "set ELECTRON_RUN_AS_NODE=1",
+        "set RIFTBOUND_ELECTRON=1",
+        `set RIFTBOUND_INSTALL_ROOT=${normalized}`,
+        `"${exe}" "${router}"`,
+      ].join(" && ");
+      spawnFn("cmd.exe", ["/c", "start", "Riftbound Update", "cmd", "/c", inner], {
+        detached: true,
+        stdio: "ignore",
+        cwd: normalized,
+        windowsHide: false,
+      }).unref();
+      return { ok: true };
+    }
+  }
+
   const updateBat = isElectron
     ? ensureElectronUpdateBat(normalized)
     : join(normalized, "Update Riftbound.bat");

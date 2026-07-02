@@ -2,7 +2,7 @@
  * Re-run the updater from %APPDATA% so Electron does not lock files under resources/riftbound/server.
  */
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,7 @@ export function reexecUpdateFromRunnerIfNeeded() {
   const outDir = runnerDir();
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, "package.json"), '{"type":"module"}\n', "utf8");
 
   for (const name of UPDATE_SCRIPTS) {
     const src = join(serverDir, name);

@@ -3,7 +3,7 @@
  * Copies patchable server update scripts to AppData, then runs them detached.
  */
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -42,6 +42,7 @@ async function main() {
   const outDir = runnerDir();
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, "package.json"), '{"type":"module"}\n', "utf8");
 
   for (const name of UPDATE_SCRIPTS) {
     const src = join(serverDir, name);
