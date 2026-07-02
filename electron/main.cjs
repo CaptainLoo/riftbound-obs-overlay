@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, shell, nativeImage } = require("electron");
+const { app, BrowserWindow, Menu, Tray, shell, nativeImage, dialog } = require("electron");
 const path = require("path");
 
 process.env.RIFTBOUND_ELECTRON = "1";
@@ -18,14 +18,33 @@ let closeServer = null;
 let isQuitting = false;
 let shuttingDown = false;
 
+function showStartupError(title, message) {
+  try {
+    dialog.showErrorBox(title, message);
+  } catch {
+    console.error(`${title}: ${message}`);
+  }
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  app.whenReady().then(() => {
+    showStartupError(
+      "Riftbound OBS",
+      "Another copy is already running.\n\nClose Riftbound OBS.exe in Task Manager, then launch again."
+    );
+  });
   app.quit();
 } else {
   app.on("second-instance", () => {
     showMainWindow();
   });
 }
+
+process.on("uncaughtException", (err) => {
+  console.error("[main] uncaughtException:", err);
+  showStartupError("Riftbound OBS crashed", err?.message || String(err));
+});
 
 async function loadStartServer() {
   const entry = app.isPackaged
@@ -122,6 +141,7 @@ function createWindow(port) {
     title: "Riftbound OBS — Control",
     icon: path.join(__dirname, "icon.png"),
     autoHideMenuBar: false,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -131,7 +151,12 @@ function createWindow(port) {
   });
 
   Menu.setApplicationMenu(buildMenu());
-  mainWindow.loadURL(`http://127.0.0.1:${port}/control`);
+  mainWindow.once("ready-to-show", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+  });
+  mainWindow.loadURL(`http://127.0.0.1:${port}/control`).catch((err) => {
+    showStartupError("Control panel failed to load", err?.message || String(err));
+  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -154,11 +179,16 @@ async function boot() {
   const result = await startServer({ port: PORT, openBrowser: false });
   closeServer = result.close;
   createWindow(result.port);
-  createTray();
+  try {
+    createTray();
+  } catch (err) {
+    console.error("[main] Tray failed:", err);
+  }
 }
 
 app.whenReady().then(boot).catch((err) => {
   console.error(err);
+  showStartupError("Riftbound OBS failed to start", err?.message || String(err));
   app.quit();
 });
 

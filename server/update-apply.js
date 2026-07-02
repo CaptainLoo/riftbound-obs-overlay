@@ -46,6 +46,25 @@ function expandZip(zipPath, destDir) {
   );
 }
 
+function runElectronNpmCi(contentRoot) {
+  const npmCli = join(contentRoot, "node_modules", "npm", "bin", "npm-cli.js");
+  if (!existsSync(npmCli)) {
+    log("npm not found in content root — skipping npm ci.");
+    return;
+  }
+  const nodeRunner = process.env.RIFTBOUND_ELECTRON === "1" ? process.execPath : null;
+  if (!nodeRunner) {
+    log("Electron runtime not detected — skipping npm ci.");
+    return;
+  }
+  log("Dependencies changed — running npm ci in content root…");
+  execSync(`"${nodeRunner}" "${npmCli}" ci --omit=dev`, {
+    cwd: contentRoot,
+    stdio: "inherit",
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  });
+}
+
 function runNpmCi(nodeRoot, workDir) {
   const nodeExe = join(nodeRoot, "node", "node.exe");
   if (!existsSync(nodeExe)) {
@@ -234,8 +253,10 @@ export async function runPatchApply() {
       if (existsSync(nodeExe)) {
         log("Dependencies changed — running npm ci…");
         runNpmCi(installRoot, contentRoot);
+      } else if (process.env.RIFTBOUND_ELECTRON === "1") {
+        runElectronNpmCi(contentRoot);
       } else {
-        log("Dependencies changed — skip npm ci (Electron install, use full installer if needed).");
+        log("Dependencies changed — skip npm ci (use full installer if modules are missing).");
       }
     }
 

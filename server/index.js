@@ -6,7 +6,7 @@ import { PUBLIC_DIR, CARDS_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./path
 import { initDb } from "./db.js";
 import { initHub } from "./hub.js";
 import { router } from "./routes.js";
-import { startStreamDeck, stopStreamDeck } from "./streamdeckDevice.js";
+import { startStreamDeckSafe, stopStreamDeckSafe } from "./streamdeckApi.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 
@@ -38,7 +38,17 @@ export async function startServer(options = {}) {
   initHub(server);
 
   await new Promise((resolve, reject) => {
-    server.once("error", reject);
+    server.once("error", (err) => {
+      if (err?.code === "EADDRINUSE") {
+        reject(
+          new Error(
+            `Port ${port} is already in use. Quit other Riftbound OBS instances in Task Manager, then try again.`
+          )
+        );
+        return;
+      }
+      reject(err);
+    });
     server.listen(port, "127.0.0.1", () => resolve());
   });
 
@@ -47,7 +57,7 @@ export async function startServer(options = {}) {
   console.log(`  Control panel            : http://localhost:${port}/control`);
   if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
   if (IS_ELECTRON && process.platform === "win32") {
-    startStreamDeck().catch((err) => console.error("[streamdeck]", err));
+    startStreamDeckSafe();
   }
 
   if (openBrowser) {
@@ -55,7 +65,7 @@ export async function startServer(options = {}) {
   }
 
   const close = async () => {
-    await stopStreamDeck();
+    await stopStreamDeckSafe();
     await new Promise((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });

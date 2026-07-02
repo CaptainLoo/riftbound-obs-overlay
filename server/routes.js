@@ -5,7 +5,7 @@ import { searchByName, cacheCard } from "./riftscribe.js";
 import { parseDecklist, resolveDecklist, resolveTTS } from "./decklist.js";
 import { buildState, broadcastState } from "./hub.js";
 import { DEVICES } from "./streamdeckLayout.js";
-import { getStreamDeckStatus } from "./streamdeckDevice.js";
+import { getStreamDeckStatusSafe } from "./streamdeckApi.js";
 import {
   applyUpdate,
   checkForUpdate,
@@ -245,8 +245,8 @@ router.get("/players/:id/cards", (req, res) => {
   res.json(playerDisplayCards(player, db.data.cardsCache));
 });
 
-router.get("/streamdeck", (_req, res) => {
-  const hid = getStreamDeckStatus();
+router.get("/streamdeck", async (_req, res) => {
+  const hid = await getStreamDeckStatusSafe();
   const showing = db.data.display?.cards || { p1: null, p2: null };
   const match = db.data.match;
   const players = db.data.players.map((p) => {

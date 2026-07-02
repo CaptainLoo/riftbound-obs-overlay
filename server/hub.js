@@ -78,7 +78,7 @@ export function broadcastState() {
   for (const client of wss.clients) {
     if (client.readyState === 1) client.send(message);
   }
-  import("./streamdeckDevice.js")
-    .then((m) => m.refreshStreamDeckIfConnected())
+  import("./streamdeckApi.js")
+    .then((m) => m.refreshStreamDeckIfConnectedSafe())
     .catch(() => {});
 }

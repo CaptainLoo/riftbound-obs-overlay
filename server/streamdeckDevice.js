@@ -1,12 +1,27 @@
 import { platform } from "node:os";
-import { DeviceModelId, listStreamDecks, openStreamDeck } from "@elgato-stream-deck/node";
 import { IS_ELECTRON } from "./paths.js";
 import { db } from "./db.js";
 import { buildPages, detectDeviceKey } from "./streamdeckLayout.js";
-import { clearImageCaches, renderKeyImage } from "./streamdeckImages.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 const API = `http://127.0.0.1:${DEFAULT_PORT}/api`;
+
+let nodeLib = null;
+let imagesMod = null;
+
+async function loadNodeLib() {
+  if (!nodeLib) {
+    nodeLib = await import("@elgato-stream-deck/node");
+  }
+  return nodeLib;
+}
+
+async function loadImagesMod() {
+  if (!imagesMod) {
+    imagesMod = await import("./streamdeckImages.js");
+  }
+  return imagesMod;
+}
 
 let deck = null;
 let pages = [];
@@ -155,8 +170,13 @@ async function drawCurrentPage() {
 
   for (const [idx, keyDef] of page.keys.entries()) {
     if (!validIndices.has(idx)) continue;
-    const jpeg = await renderKeyImage(keyDef, db.data.cardsCache, keySize);
-    await deck.fillKeyBuffer(idx, jpeg, { format: "rgb" });
+    try {
+      const { renderKeyImage } = await loadImagesMod();
+      const rgb = await renderKeyImage(keyDef, db.data.cardsCache, keySize);
+      await deck.fillKeyBuffer(idx, rgb, { format: "rgb" });
+    } catch (err) {
+      console.error(`[streamdeck] Key ${idx} draw failed:`, err.message);
+    }
   }
 }
 
@@ -179,7 +199,10 @@ export async function refreshStreamDeck(force = false) {
   if (refreshInFlight) return;
   refreshInFlight = true;
   try {
-    if (force) clearImageCaches();
+    if (force) {
+      const { clearImageCaches } = await loadImagesMod();
+      clearImageCaches();
+    }
     await rebuildPages(false);
     setStatus({ error: null });
   } catch (err) {
@@ -210,6 +233,7 @@ export async function startStreamDeck() {
   if (deck) return;
 
   try {
+    const { DeviceModelId, listStreamDecks, openStreamDeck } = await loadNodeLib();
     const devices = await listStreamDecks();
     if (!devices.length) {
       setStatus({

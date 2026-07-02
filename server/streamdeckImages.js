@@ -1,8 +1,16 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import sharp from "sharp";
 import { CARDS_DIR } from "./paths.js";
+
+let sharpLib = null;
+
+async function getSharp() {
+  if (!sharpLib) {
+    sharpLib = (await import("sharp")).default;
+  }
+  return sharpLib;
+}
 
 const ICON_COLORS = {
   hide: [226, 87, 76],
@@ -60,6 +68,7 @@ export async function renderLabelImage(label, iconKey, size = 96) {
   <text x="50%" y="${startY}" text-anchor="middle" fill="#ffffff" font-family="Segoe UI, Arial, sans-serif" font-size="${fontSize}" font-weight="600">${tspans}</text>
 </svg>`;
 
+  const sharp = await getSharp();
   const raw = await sharp(Buffer.from(svg))
     .resize(size, size)
     .flatten()
@@ -86,6 +95,7 @@ export async function renderCardKeyImage(cardId, cardsCache, label, size = 96) {
     return renderLabelImage(label || cardId, "show", size);
   }
 
+  const sharp = await getSharp();
   const resized = await sharp(src)
     .resize(size, size, { fit: "cover", position: "centre" })
     .jpeg({ quality: 88 })
