@@ -52,7 +52,13 @@ async function api(path, opts = {}) {
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => res.statusText);
-    throw new Error(txt);
+    try {
+      const parsed = JSON.parse(txt);
+      throw new Error(parsed.error || txt);
+    } catch (err) {
+      if (err instanceof Error && err.message !== txt) throw err;
+      throw new Error(txt);
+    }
   }
   return res.status === 204 ? null : res.json();
 }
@@ -1008,7 +1014,7 @@ reload()
   .then(() => buildLayoutEditor())
   .catch((err) => toast("Failed to load: " + err.message, "err"));
 
-// ---- In-app updates (Windows portable) ------------------------------------
+// ---- In-app updates (Windows portable / installer) ------------------------
 
 const updateBanner = document.getElementById("update-banner");
 const updateTitle = document.getElementById("update-banner-title");
@@ -1017,14 +1023,41 @@ const updateNotes = document.getElementById("update-banner-notes");
 const updateDownloadBtn = document.getElementById("update-download");
 const updateApplyBtn = document.getElementById("update-apply");
 const updateDismissBtn = document.getElementById("update-dismiss");
+const updateCheckBtn = document.getElementById("update-check");
+const updateProgressWrap = document.getElementById("update-progress-wrap");
+const updateProgressBar = document.getElementById("update-progress-bar");
 const appVersionEl = document.getElementById("app-version");
 
+const UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000;
 let updateState = null;
+let updateDismissedVersion = null;
+
+function formatUpdateSize(state) {
+  if (state.updateMode === "installer" && state.installer?.size) {
+    const mb = Math.round(state.installer.size / (1024 * 1024));
+    return `~${mb} MB (full installer)`;
+  }
+  return "~1 MB (light patch)";
+}
+
+function setUpdateProgress(percent) {
+  if (!updateProgressWrap || !updateProgressBar) return;
+  if (percent == null) {
+    updateProgressWrap.classList.add("hidden");
+    updateProgressBar.style.width = "0%";
+    return;
+  }
+  updateProgressWrap.classList.remove("hidden");
+  updateProgressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+}
 
 function setUpdateUi(state) {
   updateState = state;
   if (appVersionEl && state?.currentVersion) {
     appVersionEl.textContent = `v${state.currentVersion}`;
+  }
+  if (updateCheckBtn) {
+    updateCheckBtn.classList.toggle("hidden", !state?.supported);
   }
   if (!updateBanner) return;
 
@@ -1033,39 +1066,55 @@ function setUpdateUi(state) {
     return;
   }
 
-  if (state.error && !state.updateAvailable) {
+  if (state.error && !state.updateAvailable && !state.downloaded?.ready) {
     updateBanner.classList.remove("hidden");
     updateTitle.textContent = "Update check failed";
     updateDetail.textContent = state.error;
     updateNotes.classList.add("hidden");
     updateDownloadBtn.disabled = true;
     updateApplyBtn.disabled = true;
+    setUpdateProgress(null);
     return;
   }
 
-  if (!state.updateAvailable && !state.downloaded?.ready) {
+  const showBanner =
+    (state.updateAvailable || state.downloaded?.ready) &&
+    updateDismissedVersion !== (state.downloaded?.version || state.latestVersion);
+
+  if (!showBanner) {
     updateBanner.classList.add("hidden");
+    setUpdateProgress(null);
     return;
   }
 
   updateBanner.classList.remove("hidden");
 
-  if (state.downloaded?.ready) {
-    updateTitle.textContent = `Update v${state.downloaded.version} ready`;
-    updateDetail.textContent = "Click Install & restart. Stream Deck plugin will be updated automatically.";
-    updateDownloadBtn.disabled = true;
-    updateApplyBtn.disabled = false;
-  } else if (state.updateAvailable) {
-    updateTitle.textContent = `Update v${state.latestVersion} available`;
-    updateDetail.textContent = `You are on v${state.currentVersion}. Download is ~1 MB.`;
-    updateDownloadBtn.disabled = false;
-    updateApplyBtn.disabled = true;
+  if (state.installType === "portable" && state.installer) {
+    updateNotes.textContent =
+      "Tip: the Windows installer is recommended for more reliable updates. Download it from GitHub Releases when convenient.";
+    updateNotes.classList.remove("hidden");
   }
 
-  if (state.notes?.trim()) {
+  if (state.downloaded?.ready) {
+    const modeLabel = state.downloaded.mode === "installer" ? "full installer" : "patch";
+    updateTitle.textContent = `Update v${state.downloaded.version} ready`;
+    updateDetail.textContent = `${modeLabel} downloaded. Click Install & restart. Stream Deck plugin updates automatically for patches.`;
+    updateDownloadBtn.disabled = true;
+    updateApplyBtn.disabled = false;
+    setUpdateProgress(null);
+  } else if (state.updateAvailable) {
+    const modeLabel = state.updateMode === "installer" ? "Full update" : "Patch update";
+    updateTitle.textContent = `${modeLabel}: v${state.latestVersion} available`;
+    updateDetail.textContent = `You are on v${state.currentVersion}. Download size ${formatUpdateSize(state)}.`;
+    updateDownloadBtn.disabled = false;
+    updateApplyBtn.disabled = true;
+    setUpdateProgress(null);
+  }
+
+  if (state.notes?.trim() && state.installType !== "portable") {
     updateNotes.textContent = state.notes.trim();
     updateNotes.classList.remove("hidden");
-  } else {
+  } else if (!state.installType || state.installType !== "portable") {
     updateNotes.classList.add("hidden");
   }
 }
@@ -1074,7 +1123,15 @@ async function checkUpdates() {
   try {
     const state = await api("/api/update/check");
     setUpdateUi(state);
+    return state;
   } catch (err) {
+    if (updateBanner) {
+      updateBanner.classList.remove("hidden");
+      updateTitle.textContent = "Update check failed";
+      updateDetail.textContent = err.message;
+      updateDownloadBtn.disabled = true;
+      updateApplyBtn.disabled = true;
+    }
     if (appVersionEl) {
       try {
         const v = await api("/api/version");
@@ -1083,24 +1140,61 @@ async function checkUpdates() {
         /* ignore */
       }
     }
+    return null;
+  }
+}
+
+async function pollDownloadProgress() {
+  for (let i = 0; i < 120; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const p = await api("/api/update/progress");
+      if (p.status === "downloading") {
+        const label = p.percent != null ? `${p.percent}%` : "…";
+        updateDetail.textContent = `Downloading… ${label}`;
+        setUpdateProgress(p.percent ?? (p.total ? Math.round((p.received / p.total) * 100) : 50));
+      }
+      if (p.status === "complete") {
+        setUpdateProgress(100);
+        return;
+      }
+    } catch {
+      /* server may still be finishing */
+    }
   }
 }
 
 updateDownloadBtn?.addEventListener("click", async () => {
   updateDownloadBtn.disabled = true;
   updateDetail.textContent = "Downloading…";
+  setUpdateProgress(0);
+  const progressPoll = pollDownloadProgress();
   try {
     await api("/api/update/download", { method: "POST" });
+    await progressPoll;
     toast("Update downloaded", "ok");
     await checkUpdates();
   } catch (err) {
     toast(err.message, "err");
     updateDownloadBtn.disabled = false;
+    setUpdateProgress(null);
     await checkUpdates();
   }
 });
 
-async function pollAfterUpdate() {
+function compareSemverClient(a, b) {
+  const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da > db) return 1;
+    if (da < db) return -1;
+  }
+  return 0;
+}
+
+async function pollAfterUpdate(expectedVersion) {
   const maxAttempts = 45;
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -1108,6 +1202,10 @@ async function pollAfterUpdate() {
       const res = await fetch("/api/version", { cache: "no-store" });
       if (!res.ok) continue;
       const info = await res.json();
+      if (expectedVersion && compareSemverClient(info.version, expectedVersion) < 0) {
+        updateDetail.textContent = `Restarting… waiting for v${expectedVersion} (${i + 1}/${maxAttempts})`;
+        continue;
+      }
       updateDetail.textContent = info.version
         ? `Updated to v${info.version}. Reloading…`
         : "Update complete. Reloading…";
@@ -1127,17 +1225,32 @@ updateApplyBtn?.addEventListener("click", async () => {
   updateApplyBtn.disabled = true;
   updateDetail.textContent = "Installing…";
   try {
-    await api("/api/update/apply", { method: "POST" });
+    const expectedVersion = updateState?.downloaded?.version || updateState?.latestVersion;
+    const result = await api("/api/update/apply", {
+      method: "POST",
+      body: { applyToken: updateState?.applyToken },
+    });
     updateDetail.textContent = "Restarting…";
-    pollAfterUpdate();
+    pollAfterUpdate(result.expectedVersion || expectedVersion);
   } catch (err) {
     toast(err.message, "err");
     updateApplyBtn.disabled = false;
+    await checkUpdates();
   }
 });
 
 updateDismissBtn?.addEventListener("click", () => {
+  updateDismissedVersion = updateState?.downloaded?.version || updateState?.latestVersion;
   updateBanner?.classList.add("hidden");
 });
 
+updateCheckBtn?.addEventListener("click", async () => {
+  updateCheckBtn.disabled = true;
+  await checkUpdates();
+  updateCheckBtn.disabled = false;
+});
+
 checkUpdates();
+setInterval(() => {
+  if (document.visibilityState === "visible") checkUpdates();
+}, UPDATE_RECHECK_MS);

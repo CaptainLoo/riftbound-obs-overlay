@@ -10,8 +10,10 @@ const __dirname = dirname(__filename);
 export const IS_PKG = Boolean(process.pkg);
 /** True when launched via the portable Windows `Start Riftbound.bat`. */
 export const IS_PORTABLE = process.env.RIFTBOUND_PORTABLE === "1";
+/** True when launched via the Inno Setup installer shortcut. */
+export const IS_INSTALLER = process.env.RIFTBOUND_INSTALLER === "1";
 /** Packaged exe or portable folder (not dev `npm start`). */
-export const IS_RELEASE = IS_PKG || IS_PORTABLE;
+export const IS_RELEASE = IS_PKG || IS_PORTABLE || IS_INSTALLER;
 
 const DEV_ROOT = join(__dirname, "..");
 

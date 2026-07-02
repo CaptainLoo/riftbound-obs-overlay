@@ -25,9 +25,11 @@ console.log(`Building patch v${version}…\n`);
 rmSync(staging, { recursive: true, force: true });
 mkdirSync(staging, { recursive: true });
 
-execSync("npm run build:streamdeck", { cwd: ROOT, stdio: "inherit" });
+if (!process.env.SKIP_STREAMDECK_BUILD) {
+  execSync("npm run build:streamdeck", { cwd: ROOT, stdio: "inherit" });
+}
 copyAppFiles(staging);
-writeWindowsBats(staging);
+writeWindowsBats(staging, { installMode: "portable" });
 
 rmSync(zipPath, { force: true });
 execSync(`cd "${staging}" && zip -r -q "${zipPath}" .`, { stdio: "inherit" });

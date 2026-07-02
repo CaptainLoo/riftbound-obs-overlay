@@ -21,11 +21,12 @@ import {
   ROOT,
   copyAppFiles,
   getVersion,
+  NODE_VERSION,
+  sha256File,
   writeWindowsBats,
 } from "./release-shared.mjs";
 
 const OUT = join(ROOT, "dist", "win");
-const NODE_VERSION = "20.18.0";
 const NODE_ZIP = `node-v${NODE_VERSION}-win-x64.zip`;
 const NODE_URL = `https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ZIP}`;
 
@@ -53,9 +54,11 @@ cpSync(join(OUT, `node-v${NODE_VERSION}-win-x64`), join(OUT, "node"), {
 rmSync(join(OUT, `node-v${NODE_VERSION}-win-x64`), { recursive: true, force: true });
 
 console.log("Copying application…");
-execSync("npm run build:streamdeck", { cwd: ROOT, stdio: "inherit" });
+if (!process.env.SKIP_STREAMDECK_BUILD) {
+  execSync("npm run build:streamdeck", { cwd: ROOT, stdio: "inherit" });
+}
 copyAppFiles(OUT);
-writeWindowsBats(OUT);
+writeWindowsBats(OUT, { installMode: "portable" });
 
 console.log("Installing production dependencies…");
 execSync("npm ci --omit=dev", { cwd: OUT, stdio: "inherit" });

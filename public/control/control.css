@@ -608,6 +608,32 @@ select:focus {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.update-progress-wrap {
+  margin-top: 8px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  max-width: 280px;
+}
+
+.update-progress-wrap.hidden {
+  display: none;
+}
+
+.update-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.2s ease;
+}
+
+#update-check.hidden {
+  display: none;
 }
 
 .btn.ghost {

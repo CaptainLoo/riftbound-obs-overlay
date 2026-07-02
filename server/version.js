@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT_DIR } from "./paths.js";
 
@@ -36,4 +37,16 @@ export function compareSemver(a, b) {
     if (da < db) return -1;
   }
   return 0;
+}
+
+/** Bundled Node version in Windows release (null if not bundled). */
+export function getBundledNodeVersion() {
+  const nodeExe = join(ROOT_DIR, "node", "node.exe");
+  if (!existsSync(nodeExe)) return null;
+  try {
+    const out = execSync(`"${nodeExe}" -v`, { encoding: "utf8" }).trim();
+    return out.replace(/^v/, "");
+  } catch {
+    return null;
+  }
 }

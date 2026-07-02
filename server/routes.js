@@ -9,8 +9,10 @@ import {
   applyUpdate,
   checkForUpdate,
   downloadUpdate,
+  getDownloadProgress,
   getLocalVersionInfo,
 } from "./updater.js";
+import { isLocalRequest } from "./update-utils.js";
 
 export const router = Router();
 
@@ -547,6 +549,10 @@ router.get("/update/check", async (_req, res) => {
   }
 });
 
+router.get("/update/progress", (_req, res) => {
+  res.json(getDownloadProgress() || { status: "idle" });
+});
+
 router.post("/update/download", async (_req, res) => {
   try {
     res.json(await downloadUpdate());
@@ -555,9 +561,12 @@ router.post("/update/download", async (_req, res) => {
   }
 });
 
-router.post("/update/apply", (_req, res) => {
+router.post("/update/apply", (req, res) => {
+  if (!isLocalRequest(req)) {
+    return res.status(403).json({ error: "Apply is only allowed from localhost." });
+  }
   try {
-    const result = applyUpdate();
+    const result = applyUpdate(req.body?.applyToken);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });

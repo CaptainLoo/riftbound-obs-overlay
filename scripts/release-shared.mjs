@@ -12,6 +12,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export { ROOT, getVersion, readPackageJson };
 
+export const NODE_VERSION = "20.18.0";
+export const INNO_APP_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
+export const INNO_APP_NAME = "Riftbound OBS";
+
 export function getUpdateRepo() {
   const pkg = readPackageJson();
   if (process.env.RIFTBOUND_UPDATE_REPO?.trim()) {
@@ -38,13 +42,15 @@ export function copyAppFiles(outDir) {
   );
 }
 
-export function writeWindowsBats(outDir) {
+export function writeWindowsBats(outDir, { installMode = "portable" } = {}) {
+  const envFlag =
+    installMode === "installer" ? "set RIFTBOUND_INSTALLER=1" : "set RIFTBOUND_PORTABLE=1";
   writeFileSync(
     join(outDir, "Start Riftbound.bat"),
     `@echo off
 title Riftbound OBS Overlay
 cd /d "%~dp0"
-set RIFTBOUND_PORTABLE=1
+${envFlag}
 echo Starting Riftbound OBS Overlay...
 echo Control panel: http://localhost:7474/control
 echo Overlay URL:   http://localhost:7474/overlay
@@ -65,7 +71,7 @@ cd /d "%~dp0"
 echo Waiting for server to stop...
 timeout /t 3 /nobreak >nul
 echo Applying update...
-node\\node.exe server\\update-apply.js
+node\\node.exe server\\update-router.js
 if errorlevel 1 (
   echo.
   echo Update failed. Log: %APPDATA%\\RiftboundOBS\\updates\\update.log

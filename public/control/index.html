@@ -16,6 +16,7 @@
         <button class="tab" data-tab="layout">Layout</button>
       </nav>
       <span class="app-version" id="app-version"></span>
+      <button type="button" class="btn ghost small hidden" id="update-check">Check updates</button>
       <a class="overlay-link" href="/overlay" target="_blank" rel="noopener">Open overlay</a>
     </header>
 
@@ -23,6 +24,9 @@
       <div class="update-banner-text">
         <strong id="update-banner-title">Update available</strong>
         <span id="update-banner-detail" class="hint"></span>
+        <div id="update-progress-wrap" class="update-progress-wrap hidden">
+          <div id="update-progress-bar" class="update-progress-bar"></div>
+        </div>
         <pre id="update-banner-notes" class="update-notes hidden"></pre>
       </div>
       <div class="update-banner-actions">

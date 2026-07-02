@@ -10,8 +10,22 @@ import {
 } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { DATA_DIR, IS_PORTABLE, ROOT_DIR } from "./paths.js";
-import { compareSemver, getUpdateRepo, getVersion } from "./version.js";
+import { IS_INSTALLER, IS_PORTABLE, ROOT_DIR } from "./paths.js";
+import {
+  acquireLock,
+  clearDownloadProgress,
+  getApplyToken,
+  loadApplyTokenFromPending,
+  mintApplyToken,
+  pendingPath,
+  readDownloadProgress,
+  releaseLock,
+  sha256File,
+  updatesDir,
+  verifyApplyToken,
+  writeDownloadProgress,
+} from "./update-utils.js";
+import { compareSemver, getBundledNodeVersion, getUpdateRepo, getVersion } from "./version.js";
 
 const GITHUB_HEADERS = {
   Accept: "application/vnd.github+json",
@@ -19,7 +33,13 @@ const GITHUB_HEADERS = {
 };
 
 export function isUpdateSupported() {
-  return IS_PORTABLE && platform() === "win32";
+  return platform() === "win32" && (IS_PORTABLE || IS_INSTALLER);
+}
+
+export function getInstallType() {
+  if (IS_INSTALLER) return "installer";
+  if (IS_PORTABLE) return "portable";
+  return "dev";
 }
 
 export function getLocalVersionInfo() {
@@ -27,15 +47,9 @@ export function getLocalVersionInfo() {
     version: getVersion(),
     updateRepo: getUpdateRepo(),
     supported: isUpdateSupported(),
+    installType: getInstallType(),
+    nodeVersion: getBundledNodeVersion(),
   };
-}
-
-function updatesDir() {
-  return join(DATA_DIR, "updates");
-}
-
-function pendingPath() {
-  return join(updatesDir(), "pending.json");
 }
 
 async function fetchJson(url) {
@@ -45,6 +59,10 @@ async function fetchJson(url) {
     throw new Error(`GitHub API ${res.status}: ${text}`);
   }
   return res.json();
+}
+
+function findAsset(release, matcher) {
+  return (release.assets || []).find(matcher);
 }
 
 async function fetchLatestManifest() {
@@ -59,23 +77,37 @@ async function fetchLatestManifest() {
   const tag = release.tag_name?.replace(/^v/, "") || release.name;
 
   let manifest = null;
-  const manifestAsset = (release.assets || []).find((a) => a.name === "update-manifest.json");
+  const manifestAsset = findAsset(release, (a) => a.name === "update-manifest.json");
   if (manifestAsset?.browser_download_url) {
     const res = await fetch(manifestAsset.browser_download_url, { headers: GITHUB_HEADERS });
     if (res.ok) manifest = await res.json();
   }
 
-  const patchAsset = (release.assets || []).find(
+  const patchAsset = findAsset(
+    release,
     (a) => a.name.startsWith("riftbound-obs-patch-") && a.name.endsWith(".zip")
   );
-  const fullAsset = (release.assets || []).find((a) => a.name === "riftbound-obs-windows.zip");
+  const fullAsset = findAsset(release, (a) => a.name === "riftbound-obs-windows.zip");
+  const installerAsset = findAsset(
+    release,
+    (a) => a.name.startsWith("riftbound-setup-") && a.name.endsWith(".exe")
+  );
 
   if (!manifest) {
     manifest = {
       version: tag,
+      channel: "stable",
       notes: release.body || "",
       patch: patchAsset
         ? { url: patchAsset.browser_download_url, sha256: null, file: patchAsset.name }
+        : null,
+      installer: installerAsset
+        ? {
+            url: installerAsset.browser_download_url,
+            sha256: null,
+            file: installerAsset.name,
+            size: installerAsset.size || null,
+          }
         : null,
       full: fullAsset ? { url: fullAsset.browser_download_url, file: fullAsset.name } : null,
     };
@@ -87,6 +119,14 @@ async function fetchLatestManifest() {
         file: patchAsset.name,
       };
     }
+    if (!manifest.installer?.url && installerAsset) {
+      manifest.installer = {
+        ...manifest.installer,
+        url: installerAsset.browser_download_url,
+        file: installerAsset.name,
+        size: installerAsset.size || manifest.installer?.size || null,
+      };
+    }
     if (!manifest.full?.url && fullAsset) {
       manifest.full = { url: fullAsset.browser_download_url, file: fullAsset.name };
     }
@@ -94,19 +134,44 @@ async function fetchLatestManifest() {
   }
 
   manifest.version = manifest.version || tag;
+  manifest.channel = manifest.channel || "stable";
   return manifest;
 }
 
-function cleanupStalePending(currentVersion) {
+function resolveUpdateMode(manifest, currentVersion) {
+  if (compareSemver(manifest.version, currentVersion) <= 0) return null;
+  if (manifest.forceFull) return "installer";
+  const bundledNode = getBundledNodeVersion();
+  if (manifest.nodeVersion && bundledNode && manifest.nodeVersion !== bundledNode) {
+    return "installer";
+  }
+  if (manifest.minPatchFrom && compareSemver(currentVersion, manifest.minPatchFrom) < 0) {
+    return "installer";
+  }
+  if (manifest.patch?.url || manifest.patch?.file) return "patch";
+  if (manifest.installer?.url || manifest.installer?.file) return "installer";
+  return null;
+}
+
+function removePendingFiles(data) {
+  if (data?.patchZip && existsSync(data.patchZip)) unlinkSync(data.patchZip);
+  if (data?.installerExe && existsSync(data.installerExe)) unlinkSync(data.installerExe);
+  if (existsSync(pendingPath())) unlinkSync(pendingPath());
+}
+
+function cleanupStalePending(currentVersion, latestVersion = null) {
   const pending = pendingPath();
   if (!existsSync(pending)) return;
   try {
     const data = JSON.parse(readFileSync(pending, "utf8"));
-    if (!data.version || compareSemver(data.version, currentVersion) <= 0) {
-      if (data.patchZip && existsSync(data.patchZip)) {
-        unlinkSync(data.patchZip);
-      }
-      unlinkSync(pending);
+    const tooOldForInstalled =
+      !data.version || compareSemver(data.version, currentVersion) <= 0;
+    const tooOldForLatest =
+      latestVersion &&
+      data.version &&
+      compareSemver(data.version, latestVersion) < 0;
+    if (tooOldForInstalled || tooOldForLatest) {
+      removePendingFiles(data);
     }
   } catch {
     try {
@@ -117,18 +182,20 @@ function cleanupStalePending(currentVersion) {
   }
 }
 
-function getDownloadStatus(currentVersion) {
-  cleanupStalePending(currentVersion);
+function getDownloadStatus(currentVersion, latestVersion) {
+  cleanupStalePending(currentVersion, latestVersion);
   const pending = pendingPath();
   if (!existsSync(pending)) return null;
   try {
     const data = JSON.parse(readFileSync(pending, "utf8"));
-    if (!data.version || compareSemver(data.version, currentVersion) <= 0) {
-      return null;
-    }
+    if (!data.version || compareSemver(data.version, currentVersion) <= 0) return null;
+    if (latestVersion && compareSemver(data.version, latestVersion) < 0) return null;
+
+    const artifactPath = data.mode === "installer" ? data.installerExe : data.patchZip;
     return {
       version: data.version,
-      ready: existsSync(data.patchZip),
+      mode: data.mode || "patch",
+      ready: Boolean(artifactPath && existsSync(artifactPath)),
       sha256: data.sha256,
     };
   } catch {
@@ -141,7 +208,8 @@ export async function checkForUpdate() {
     return {
       supported: false,
       currentVersion: getVersion(),
-      message: "In-app updates are only available on the Windows portable install.",
+      installType: getInstallType(),
+      message: "In-app updates are only available on the Windows install.",
     };
   }
 
@@ -153,24 +221,93 @@ export async function checkForUpdate() {
     return {
       supported: true,
       currentVersion,
+      installType: getInstallType(),
       error: err.message,
       updateAvailable: false,
     };
   }
 
   const latestVersion = manifest.version;
-  const cmp = compareSemver(latestVersion, currentVersion);
+  const updateAvailable = compareSemver(latestVersion, currentVersion) > 0;
+  const updateMode = updateAvailable ? resolveUpdateMode(manifest, currentVersion) : null;
+  const downloaded = getDownloadStatus(currentVersion, latestVersion);
+  loadApplyTokenFromPending();
 
   return {
     supported: true,
     currentVersion,
     latestVersion,
-    updateAvailable: cmp > 0,
+    updateAvailable,
+    updateMode,
+    installType: getInstallType(),
+    nodeVersion: getBundledNodeVersion(),
     notes: manifest.notes || "",
     patch: manifest.patch || null,
+    installer: manifest.installer || null,
     full: manifest.full || null,
-    downloaded: getDownloadStatus(currentVersion),
+    forceFull: Boolean(manifest.forceFull),
+    downloaded,
+    applyToken: getApplyToken(),
   };
+}
+
+async function downloadArtifact(url, destPath, expectedSha256, onProgress) {
+  const res = await fetch(url, { headers: GITHUB_HEADERS });
+  if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+
+  const total = Number(res.headers.get("content-length") || 0);
+  const body = res.body;
+  if (!body) throw new Error("Empty download body");
+
+  const hash = createHash("sha256");
+  const out = createWriteStream(destPath);
+  out.on("error", (err) => {
+    throw err;
+  });
+
+  let received = 0;
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      hash.update(value);
+      received += value.length;
+      if (!out.write(value)) {
+        await new Promise((resolve) => out.once("drain", resolve));
+      }
+      if (onProgress) {
+        onProgress({ received, total, percent: total ? Math.round((received / total) * 100) : null });
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  await new Promise((resolve, reject) => {
+    out.end(() => resolve());
+    out.on("error", reject);
+  });
+
+  const sha256 = hash.digest("hex");
+  if (expectedSha256 && sha256 !== expectedSha256) {
+    unlinkSync(destPath);
+    throw new Error("Download failed SHA256 verification.");
+  }
+  return sha256;
+}
+
+function existingPendingMatches(status) {
+  if (!existsSync(pendingPath())) return false;
+  try {
+    const data = JSON.parse(readFileSync(pendingPath(), "utf8"));
+    if (data.version !== status.latestVersion) return false;
+    if ((data.mode || "patch") !== status.updateMode) return false;
+    const artifactPath = data.mode === "installer" ? data.installerExe : data.patchZip;
+    return Boolean(artifactPath && existsSync(artifactPath));
+  } catch {
+    return false;
+  }
 }
 
 export async function downloadUpdate() {
@@ -178,107 +315,150 @@ export async function downloadUpdate() {
     throw new Error("Updates not supported on this platform.");
   }
 
-  const status = await checkForUpdate();
-  if (status.error) throw new Error(status.error);
-  if (!status.updateAvailable) {
-    return { ok: true, message: "Already up to date.", ...status };
-  }
-  if (!status.patch?.url) {
-    throw new Error("No patch asset in the latest release.");
-  }
-
-  mkdirSync(updatesDir(), { recursive: true });
-  const zipPath = join(updatesDir(), status.patch.file || `patch-${status.latestVersion}.zip`);
-
-  const res = await fetch(status.patch.url, { headers: GITHUB_HEADERS });
-  if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
-
-  const body = res.body;
-  if (!body) throw new Error("Empty download body");
-
-  const hash = createHash("sha256");
-  const out = createWriteStream(zipPath);
-  const reader = body.getReader();
+  acquireLock("download");
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      hash.update(value);
-      if (!out.write(value)) {
-        await new Promise((resolve) => out.once("drain", resolve));
-      }
+    const status = await checkForUpdate();
+    if (status.error) throw new Error(status.error);
+    if (!status.updateAvailable) {
+      return { ok: true, message: "Already up to date.", ...status };
     }
-  } finally {
-    reader.releaseLock();
-  }
-  await new Promise((resolve, reject) => {
-    out.end(() => resolve());
-    out.on("error", reject);
-  });
+    if (!status.updateMode) {
+      throw new Error("No update artifact available in the latest release.");
+    }
 
-  const sha256 = hash.digest("hex");
-  if (status.patch.sha256 && sha256 !== status.patch.sha256) {
-    throw new Error("Downloaded patch failed SHA256 verification.");
-  }
+    if (existingPendingMatches(status)) {
+      const data = JSON.parse(readFileSync(pendingPath(), "utf8"));
+      return {
+        ok: true,
+        message: "Update already downloaded.",
+        version: data.version,
+        mode: data.mode || "patch",
+        ready: true,
+        skipped: true,
+      };
+    }
 
-  writeFileSync(
-    pendingPath(),
-    JSON.stringify(
-      {
+    mkdirSync(updatesDir(), { recursive: true });
+    clearDownloadProgress();
+
+    const token = mintApplyToken();
+    let sha256;
+    let pending;
+
+    if (status.updateMode === "installer") {
+      if (!status.installer?.url) throw new Error("No installer asset in the latest release.");
+      const dest = join(
+        updatesDir(),
+        status.installer.file || `riftbound-setup-${status.latestVersion}.exe`
+      );
+      writeDownloadProgress({ status: "downloading", mode: "installer", received: 0, total: status.installer.size || 0 });
+      sha256 = await downloadArtifact(
+        status.installer.url,
+        dest,
+        status.installer.sha256,
+        (p) => writeDownloadProgress({ status: "downloading", mode: "installer", ...p })
+      );
+      pending = {
         version: status.latestVersion,
-        patchZip: zipPath,
+        mode: "installer",
+        installerExe: dest,
         sha256,
         restart: true,
         installRoot: ROOT_DIR.replace(/[\\/]+$/, ""),
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+        applyToken: token,
+      };
+    } else {
+      if (!status.patch?.url) throw new Error("No patch asset in the latest release.");
+      const dest = join(updatesDir(), status.patch.file || `patch-${status.latestVersion}.zip`);
+      writeDownloadProgress({ status: "downloading", mode: "patch", received: 0, total: 0 });
+      sha256 = await downloadArtifact(
+        status.patch.url,
+        dest,
+        status.patch.sha256,
+        (p) => writeDownloadProgress({ status: "downloading", mode: "patch", ...p })
+      );
+      pending = {
+        version: status.latestVersion,
+        mode: "patch",
+        patchZip: dest,
+        sha256,
+        restart: true,
+        installRoot: ROOT_DIR.replace(/[\\/]+$/, ""),
+        applyToken: token,
+      };
+    }
 
-  return {
-    ok: true,
-    version: status.latestVersion,
-    patchZip: zipPath,
-    sha256,
-    ready: true,
-  };
+    writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
+    writeDownloadProgress({ status: "complete", mode: status.updateMode, received: 1, total: 1, percent: 100 });
+
+    return {
+      ok: true,
+      version: status.latestVersion,
+      mode: status.updateMode,
+      sha256,
+      ready: true,
+      applyToken: token,
+    };
+  } finally {
+    releaseLock();
+  }
 }
 
-export function applyUpdate() {
+export function getDownloadProgress() {
+  return readDownloadProgress();
+}
+
+export function applyUpdate(applyTokenFromClient) {
   if (!isUpdateSupported()) {
     throw new Error("Updates not supported on this platform.");
   }
+  if (!verifyApplyToken(applyTokenFromClient)) {
+    loadApplyTokenFromPending();
+    if (!verifyApplyToken(applyTokenFromClient)) {
+      throw new Error("Invalid or expired update token. Refresh the control panel and try again.");
+    }
+  }
   if (!existsSync(pendingPath())) {
-    throw new Error("No update downloaded. Download the patch first.");
+    throw new Error("No update downloaded. Download the update first.");
   }
 
-  const pending = JSON.parse(readFileSync(pendingPath(), "utf8"));
-  const currentVersion = getVersion();
-  if (!pending.version || compareSemver(pending.version, currentVersion) <= 0) {
-    cleanupStalePending(currentVersion);
-    throw new Error(
-      `Downloaded update v${pending.version || "?"} is not newer than v${currentVersion}.`
-    );
+  acquireLock("apply");
+  try {
+    const pending = JSON.parse(readFileSync(pendingPath(), "utf8"));
+    const currentVersion = getVersion();
+    if (!pending.version || compareSemver(pending.version, currentVersion) <= 0) {
+      cleanupStalePending(currentVersion);
+      throw new Error(
+        `Downloaded update v${pending.version || "?"} is not newer than v${currentVersion}.`
+      );
+    }
+
+    pending.restart = true;
+    pending.installRoot = ROOT_DIR.replace(/[\\/]+$/, "");
+    pending.applyToken = applyTokenFromClient || getApplyToken();
+    writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
+
+    const updateBat = join(ROOT_DIR, "Update Riftbound.bat");
+    if (!existsSync(updateBat)) {
+      throw new Error("Update Riftbound.bat not found in install folder.");
+    }
+
+    spawn("cmd.exe", ["/c", "start", "Riftbound Update", updateBat], {
+      detached: true,
+      stdio: "ignore",
+      cwd: ROOT_DIR,
+      windowsHide: false,
+    }).unref();
+
+    setTimeout(() => process.exit(0), 500);
+    return {
+      ok: true,
+      message: "Applying update and restarting…",
+      expectedVersion: pending.version,
+      mode: pending.mode || "patch",
+    };
+  } catch (err) {
+    releaseLock();
+    throw err;
   }
-  pending.restart = true;
-  pending.installRoot = ROOT_DIR.replace(/[\\/]+$/, "");
-  writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
-
-  const updateBat = join(ROOT_DIR, "Update Riftbound.bat");
-  if (!existsSync(updateBat)) {
-    throw new Error("Update Riftbound.bat not found in install folder.");
-  }
-
-  // Visible cmd window; bat waits a few seconds so this process can exit and release file locks.
-  spawn("cmd.exe", ["/c", "start", "Riftbound Update", updateBat], {
-    detached: true,
-    stdio: "ignore",
-    cwd: ROOT_DIR,
-    windowsHide: false,
-  }).unref();
-
-  setTimeout(() => process.exit(0), 500);
-  return { ok: true, message: "Applying update and restarting…" };
 }

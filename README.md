@@ -61,7 +61,22 @@ Data (decks, layout, cached images) is stored in `%APPDATA%\RiftboundOBS\`.
 
 ## Mac dev → Windows streaming (updates)
 
-Develop on macOS, stream on Windows with **in-app updates** (~1 MB patch, not the full zip).
+Develop on macOS, stream on Windows with **in-app updates** (light ~1 MB patch by default, full installer when needed).
+
+### Recommended: Windows installer
+
+1. Download **`riftbound-setup-X.Y.Z.exe`** from [GitHub Releases](https://github.com/CaptainLoo/riftbound-obs-overlay/releases).
+2. Run the installer (per-user, no admin required). Installs to `%LOCALAPPDATA%\Riftbound OBS\`.
+3. Launch **Riftbound OBS** from the Start menu.
+4. Updates use a **hybrid channel**: small patches for app code, silent full installer when Node runtime changes or `forceFull` is set in the manifest.
+
+### Legacy: portable zip
+
+1. Extract **`riftbound-obs-windows.zip`** anywhere.
+2. Double-click **`Start Riftbound.bat`**.
+3. Patches still work; the control panel may suggest migrating to the installer.
+
+Data (decks, layout, cached images) is always stored in `%APPDATA%\RiftboundOBS\` — never overwritten by updates.
 
 ### One-time setup
 
@@ -74,8 +89,6 @@ npm run setup:github          # creates repo, pushes code
 npm run setup:github -- --release   # optional: first GitHub Release for auto-updates
 ```
 
-3. On the Windows PC: extract **`riftbound-obs-windows.zip`** once (full install ~34 MB).
-
 ### Daily workflow (Mac)
 
 ```bash
@@ -86,28 +99,49 @@ npm run publish        # bump patch version, build, push GitHub Release
 `npm run publish` uploads:
 
 - `riftbound-obs-patch-X.Y.Z.zip` — incremental update (~1 MB)
-- `riftbound-obs-windows.zip` — full install for new machines
-- `update-manifest.json` — version + SHA256 for the updater
+- `riftbound-obs-windows.zip` — full portable zip for new machines
+- `riftbound-setup-X.Y.Z.exe` — Windows installer (when Inno Setup `iscc` is available)
+- `update-manifest.json` — version, SHA256, node version, patch vs installer routing
 
 Options: `npm run publish -- minor`, `npm run publish -- --no-bump`, `npm run publish -- --notes="Fix overlay"`.
+
+Build commands:
+
+```bash
+npm run build:patch       # patch zip only
+npm run build:win         # portable folder + zip
+npm run build:installer   # setup.exe (requires Inno Setup 6+)
+```
+
+GitHub Actions workflow (`.github/workflows/release.yml`) builds all assets on tagged releases.
 
 ### On Windows (after first install)
 
 1. Open the control panel (`http://localhost:7474/control`).
-2. When an update is available, a banner appears at the top.
+2. When an update is available, a banner appears at the top (or click **Check updates**).
 3. Click **Download**, then **Install & restart**.
-4. The Stream Deck plugin is updated automatically; restart Stream Deck if keys behave oddly.
+4. The panel waits until the new version is detected, then reloads.
+5. Stream Deck plugin is updated automatically on patch updates; restart Stream Deck if keys behave oddly.
 
-Your decks and layout in `%APPDATA%\RiftboundOBS\` are never overwritten.
+If update fails, check `%APPDATA%\RiftboundOBS\updates\update.log` and restart with **Start Riftbound.bat**.
+
+### Windows QA checklist (before calling updates stable)
+
+1. Fresh install via `riftbound-setup.exe` — overlay + control panel work.
+2. Patch update vN → vN+1 — version header updates, decks preserved.
+3. Stale patch ignored when a newer release exists.
+4. Install & restart completes and reloads to the new version.
+5. Double-click Install does not corrupt the install (apply lock).
+6. Interrupted apply leaves the previous version intact (backup/rollback).
+7. `forceFull` or Node version mismatch triggers installer download path.
 
 ### Manual builds (without publishing)
 
 ```bash
 npm run build:patch    # dist/riftbound-obs-patch-VERSION.zip only
 npm run build:win      # full portable zip
+npm run build:installer
 ```
-
-A GitHub Actions workflow (`.github/workflows/build-win.yml`) also builds the zip automatically on tagged releases or manual dispatch.
 
 ## OBS integration
 
