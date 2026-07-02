@@ -14,6 +14,7 @@ import { IS_ELECTRON, IS_INSTALLER, IS_PORTABLE, getInstallRoot } from "./paths.
 import {
   acquireLock,
   clearDownloadProgress,
+  clearStaleLock,
   getApplyToken,
   loadApplyTokenFromPending,
   mintApplyToken,
@@ -316,6 +317,7 @@ export async function downloadUpdate() {
     throw new Error("Updates not supported on this platform.");
   }
 
+  clearStaleLock();
   acquireLock("download");
   try {
     const status = await checkForUpdate();
@@ -423,6 +425,7 @@ export function applyUpdate(applyTokenFromClient) {
     throw new Error("No update downloaded. Download the update first.");
   }
 
+  clearStaleLock();
   acquireLock("apply");
   try {
     const pending = JSON.parse(readFileSync(pendingPath(), "utf8"));
@@ -451,6 +454,7 @@ export function applyUpdate(applyTokenFromClient) {
       windowsHide: false,
     }).unref();
 
+    releaseLock();
     setTimeout(() => process.exit(0), 500);
     return {
       ok: true,

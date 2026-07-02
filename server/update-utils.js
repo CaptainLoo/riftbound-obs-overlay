@@ -13,6 +13,26 @@ import { DATA_DIR } from "./paths.js";
 
 const LOCK_STALE_MS = 10 * 60 * 1000;
 
+function isProcessAlive(pid) {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function canTakeoverLock(existing, nextLabel) {
+  if (existing.label === "apply" && (nextLabel === "patch-apply" || nextLabel === "installer-apply")) {
+    return true;
+  }
+  const age = Date.now() - (existing.at || 0);
+  if (age >= LOCK_STALE_MS) return true;
+  if (existing.pid && !isProcessAlive(existing.pid)) return true;
+  return false;
+}
+
 let applyToken = null;
 
 export function updatesDir() {
@@ -73,7 +93,7 @@ export function acquireLock(label) {
   if (existsSync(lockPath())) {
     try {
       const data = JSON.parse(readFileSync(lockPath(), "utf8"));
-      if (Date.now() - (data.at || 0) < LOCK_STALE_MS) {
+      if (!canTakeoverLock(data, label)) {
         throw new Error("Update already in progress.");
       }
     } catch (err) {
@@ -86,6 +106,26 @@ export function acquireLock(label) {
     JSON.stringify({ pid: process.pid, label, at: Date.now() }, null, 2),
     "utf8"
   );
+}
+
+/** Remove a stale lock left by a crashed or exited updater process. */
+export function clearStaleLock() {
+  if (!existsSync(lockPath())) return false;
+  try {
+    const data = JSON.parse(readFileSync(lockPath(), "utf8"));
+    if (canTakeoverLock(data, "clear")) {
+      unlinkSync(lockPath());
+      return true;
+    }
+  } catch {
+    try {
+      unlinkSync(lockPath());
+      return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
 }
 
 export function releaseLock() {
