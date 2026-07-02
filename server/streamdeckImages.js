@@ -143,3 +143,31 @@ export function clearImageCaches() {
   labelCache.clear();
   cardCache.clear();
 }
+
+/**
+ * JPEG encoder for @elgato-stream-deck — bypasses @julusian/jpeg-turbo which can hang
+ * when the native module is misbuilt. Falls back to jpeg-js if Sharp fails.
+ */
+export async function encodeJpegWithSharp(buffer, width, height, options) {
+  const quality = options?.quality ?? 85;
+  const pixelBuffer = Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
+  try {
+    const sharp = await getSharp();
+    return sharp(pixelBuffer, {
+      raw: { width, height, channels: 4 },
+    })
+      .jpeg({ quality })
+      .toBuffer();
+  } catch (sharpErr) {
+    try {
+      const jpegJS = await import("jpeg-js");
+      const encoded = jpegJS.encode({ width, height, data: buffer }, quality);
+      return encoded.data;
+    } catch (jpegErr) {
+      throw new Error(
+        `JPEG encode failed (sharp: ${sharpErr.message}; jpeg-js: ${jpegErr.message})`
+      );
+    }
+  }
+}

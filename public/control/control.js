@@ -652,12 +652,30 @@ async function renderStreamDeck() {
         info.drawProgress.total > 0 &&
         info.drawProgress.done < info.drawProgress.total
       ) {
+        const phase =
+          info.drawProgress.phase === "upload"
+            ? "uploading"
+            : info.drawProgress.phase === "render"
+              ? "rendering"
+              : "loading";
+        const keyNote =
+          typeof info.drawProgress.current === "number"
+            ? ` key ${info.drawProgress.current + 1}`
+            : "";
         parts.push(
-          `Loading key images (${info.drawProgress.done}/${info.drawProgress.total})…`
+          `Loading key images (${info.drawProgress.done}/${info.drawProgress.total}, ${phase}${keyNote})…`
         );
+      } else if (info.imagesDegraded && info.hint) {
+        parts.push("Colors only");
       }
       detail.textContent = parts.join(" · ");
-      if (hint) hint.textContent = info.hint || "";
+      if (hint) {
+        hint.textContent =
+          info.hint ||
+          (info.imagesDegraded
+            ? "Some keys show colors only — buttons still work."
+            : "");
+      }
     } else if (info.phase === "error" || (info.error && info.phase !== "loading" && info.phase !== "scanning" && info.phase !== "opening" && info.phase !== "drawing")) {
       badge.textContent = "Error";
       badge.className = "sd-status-badge sd-status-err";

@@ -2,9 +2,11 @@ import { platform } from "node:os";
 import { IS_ELECTRON } from "./paths.js";
 import { db } from "./db.js";
 import { buildPages, detectDeviceKey } from "./streamdeckLayout.js";
+import { logStartup } from "./startupLog.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 const API = `http://127.0.0.1:${DEFAULT_PORT}/api`;
+const KEY_DRAW_TIMEOUT_MS = 8000;
 
 let nodeLib = null;
 let imagesMod = null;
@@ -47,9 +49,13 @@ let status = {
   devicesFound: [],
   lastScanAt: null,
   drawProgress: null,
+  imagesReady: false,
+  imagesDegraded: false,
+  hint: null,
 };
 
 let imageDrawInFlight = false;
+let imageDrawGeneration = 0;
 
 function setStatus(patch) {
   status = { ...status, ...patch };
@@ -110,12 +116,63 @@ async function apiPost(path, body = {}) {
   return res.json().catch(() => ({}));
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function yieldToEventLoop() {
+  return new Promise((r) => setImmediate(r));
+}
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]);
+}
+
+function unwrapPreparedBuffer(modelId, prepared) {
+  if (prepared.modelId !== modelId) {
+    throw new Error("Prepared buffer is for a different model!");
+  }
+  return prepared.do_not_touch.map((b) => {
+    if (typeof b === "string") return Buffer.from(b, "base64");
+    if (b instanceof Uint8Array) return b;
+    throw new Error("Prepared buffer is not a string or Uint8Array!");
+  });
+}
+
+function getHidDevice() {
+  return deck?.device?.device ?? null;
+}
+
+async function fillKeyBufferYielding(keyIndex, rgb, options) {
+  const prepared = await deck.prepareFillKeyBuffer(keyIndex, rgb, options);
+  const packets = unwrapPreparedBuffer(deck.MODEL, prepared);
+  const hidDevice = getHidDevice();
+
+  if (!hidDevice?.sendReports) {
+    await deck.fillKeyBuffer(keyIndex, rgb, options);
+    return;
+  }
+
+  for (const packet of packets) {
+    await hidDevice.sendReports([packet]);
+    await yieldToEventLoop();
+    await sleep(1);
+  }
+}
+
 async function flashKey(keyIndex, r, g, b) {
   if (!deck) return;
   try {
     await deck.fillKeyColor(keyIndex, r, g, b);
     setTimeout(() => {
-      drawCurrentPage().catch(() => {});
+      drawCurrentPageColorsOnly()
+        .then(() => scheduleImageDraw())
+        .catch(() => {});
     }, 180);
   } catch {
     /* ignore */
@@ -210,10 +267,10 @@ async function fillKeyWithColorFallback(keyIndex, keyDef) {
   await deck.fillKeyColor(keyIndex, r, g, b);
 }
 
-async function drawCurrentPageImages() {
-  if (!deck || !pages.length) return { drawn: 0, failed: 0 };
+async function drawCurrentPageImages(generation) {
+  if (!deck || !pages.length) return { drawn: 0, failed: 0, cancelled: false };
   const page = pages[currentPageIndex];
-  if (!page) return { drawn: 0, failed: 0 };
+  if (!page) return { drawn: 0, failed: 0, cancelled: false };
 
   const controls = deck.CONTROLS.filter((c) => c.type === "button");
   const validIndices = new Set(controls.map((c) => c.index));
@@ -223,47 +280,120 @@ async function drawCurrentPageImages() {
   let drawn = 0;
   let failed = 0;
 
-  setStatus({ drawProgress: { done: 0, total, failed: 0 } });
+  setStatus({
+    drawProgress: { done: 0, total, failed: 0, phase: "render" },
+    imagesReady: false,
+    imagesDegraded: false,
+    hint: null,
+  });
 
   for (const [idx, keyDef] of entries) {
+    if (generation !== imageDrawGeneration) {
+      return { drawn, failed, cancelled: true };
+    }
+
+    setStatus({
+      drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "render" },
+    });
+
     try {
       const { renderKeyImage } = await loadImagesMod();
-      const rgb = await renderKeyImage(keyDef, db.data.cardsCache, keySize);
+      const rgb = await withTimeout(
+        renderKeyImage(keyDef, db.data.cardsCache, keySize),
+        KEY_DRAW_TIMEOUT_MS,
+        `Key ${idx} render`
+      );
       if (rgb.length !== expectedBytes) {
         throw new Error(`expected ${expectedBytes} bytes, got ${rgb.length}`);
       }
-      await deck.fillKeyBuffer(idx, rgb, { format: "rgb" });
+
+      if (generation !== imageDrawGeneration) {
+        return { drawn, failed, cancelled: true };
+      }
+
+      setStatus({
+        drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "upload" },
+      });
+
+      await withTimeout(
+        fillKeyBufferYielding(idx, rgb, { format: "rgb" }),
+        KEY_DRAW_TIMEOUT_MS,
+        `Key ${idx} upload`
+      );
       drawn += 1;
     } catch (err) {
       failed += 1;
       console.error(`[streamdeck] Key ${idx} image failed, using color:`, err.message);
+      logStartup(`[streamdeck] Key ${idx} image failed: ${err.message}`);
       try {
         await fillKeyWithColorFallback(idx, keyDef);
       } catch (fallbackErr) {
         console.error(`[streamdeck] Key ${idx} color fallback failed:`, fallbackErr.message);
       }
     }
-    setStatus({ drawProgress: { done: drawn + failed, total, failed } });
+
+    setStatus({
+      drawProgress: { done: drawn + failed, total, failed, current: idx, phase: "upload" },
+    });
+    await yieldToEventLoop();
   }
 
-  setStatus({ drawProgress: null });
-  return { drawn, failed };
+  if (generation !== imageDrawGeneration) {
+    return { drawn, failed, cancelled: true };
+  }
+
+  const imagesDegraded = failed > 0;
+  const imagesReady = drawn > 0;
+  setStatus({
+    drawProgress: null,
+    imagesReady,
+    imagesDegraded,
+    hint: imagesDegraded
+      ? `${failed} key(s) show colors only — buttons still work. Reinstall the app for full labels.`
+      : imagesReady
+        ? null
+        : "Key labels unavailable — buttons work with colors only.",
+  });
+
+  return { drawn, failed, cancelled: false };
+}
+
+async function runImageDraw(generation) {
+  if (!deck || generation !== imageDrawGeneration) return;
+  imageDrawInFlight = true;
+  try {
+    await drawCurrentPageImages(generation);
+  } catch (err) {
+    console.error("[streamdeck] Background image draw failed:", err.message);
+    logStartup("[streamdeck] Background image draw failed", err);
+    if (generation === imageDrawGeneration) {
+      setStatus({
+        drawProgress: null,
+        imagesDegraded: true,
+        hint: "Key image loading failed — buttons work with colors only.",
+      });
+    }
+  } finally {
+    imageDrawInFlight = false;
+    if (deck && generation !== imageDrawGeneration) {
+      runImageDraw(imageDrawGeneration);
+    }
+  }
 }
 
 function scheduleImageDraw() {
-  if (!deck || imageDrawInFlight) return;
-  imageDrawInFlight = true;
-  drawCurrentPageImages()
-    .catch((err) => console.error("[streamdeck] Background image draw failed:", err.message))
-    .finally(() => {
-      imageDrawInFlight = false;
-    });
+  if (!deck) return;
+  imageDrawGeneration += 1;
+  const gen = imageDrawGeneration;
+  if (!imageDrawInFlight) {
+    runImageDraw(gen);
+  }
 }
 
 async function drawCurrentPage() {
-  if (!deck || !pages.length) return { drawn: 0, failed: 0 };
+  if (!deck || !pages.length) return;
   await drawCurrentPageColorsOnly();
-  return drawCurrentPageImages();
+  scheduleImageDraw();
 }
 
 async function rebuildPages(resetPage = false) {
@@ -309,10 +439,6 @@ export function refreshStreamDeckIfConnected() {
 
 export function getStreamDeckStatus() {
   return { ...status };
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function scanStreamDecks(maxAttempts = 6, delayMs = 1500) {
@@ -361,6 +487,7 @@ export async function startStreamDeck() {
   try {
     await preflightNativeModules();
     const { DeviceModelId, openStreamDeck } = await loadNodeLib();
+    const { encodeJpegWithSharp } = await loadImagesMod();
     const devices = await scanStreamDecks();
     if (!devices.length) {
       setStatus({
@@ -380,7 +507,7 @@ export async function startStreamDeck() {
       devices.find((d) => d.model === DeviceModelId.MINI) ||
       devices[0];
 
-    deck = await openStreamDeck(preferred.path);
+    deck = await openStreamDeck(preferred.path, { encodeJPEG: encodeJpegWithSharp });
     const buttonControl = deck.CONTROLS.find((c) => c.type === "button" && c.feedbackType === "lcd");
     keySize = buttonControl?.pixelSize?.width || 96;
 
@@ -393,7 +520,13 @@ export async function startStreamDeck() {
       if (control.type !== "button") return;
       const page = pages[currentPageIndex];
       const keyDef = page?.keys.get(control.index);
-      if (!keyDef) return;
+      if (!keyDef) {
+        logStartup(
+          `[streamdeck] Unmapped key press index=${control.index} page=${currentPageIndex}`
+        );
+        return;
+      }
+      logStartup(`[streamdeck] Key down index=${control.index} type=${keyDef.type}`);
       handleKeyAction(keyDef, control.index).catch((err) => console.error("[streamdeck]", err));
     });
 
@@ -422,6 +555,9 @@ export async function startStreamDeck() {
       phase: "drawing",
       connected: false,
       drawProgress: null,
+      imagesReady: false,
+      imagesDegraded: false,
+      hint: null,
     });
 
     await drawCurrentPageColorsOnly();
@@ -433,6 +569,7 @@ export async function startStreamDeck() {
     });
 
     console.log(`[streamdeck] Connected: ${deck.PRODUCT_NAME} (${pages.length} pages)`);
+    logStartup(`[streamdeck] Connected: ${deck.PRODUCT_NAME} (${pages.length} pages)`);
     scheduleImageDraw();
   } catch (err) {
     console.error("[streamdeck] Failed to open device:", err);
@@ -449,6 +586,7 @@ export async function startStreamDeck() {
 
 export async function stopStreamDeck() {
   clearTimeout(refreshTimer);
+  imageDrawGeneration += 1;
   if (!deck) return;
   try {
     if (process.env.RIFTBOUND_SD_QUICK_CLOSE === "1") {
@@ -474,5 +612,9 @@ export async function stopStreamDeck() {
     pageNames: [],
     currentPage: 0,
     error: null,
+    drawProgress: null,
+    imagesReady: false,
+    imagesDegraded: false,
+    hint: null,
   });
 }

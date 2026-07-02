@@ -26,6 +26,9 @@ function idleStatus(error = null) {
     pageNames: [],
     devicesFound: [],
     drawProgress: null,
+    imagesReady: false,
+    imagesDegraded: false,
+    hint: null,
   };
 }
 
