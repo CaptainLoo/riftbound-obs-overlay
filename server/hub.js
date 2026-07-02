@@ -71,6 +71,24 @@ export function initHub(server) {
   });
 }
 
+/** Terminate WebSocket clients so HTTP server.close() does not hang during updates. */
+export function closeHub() {
+  if (!wss) return;
+  for (const client of wss.clients) {
+    try {
+      client.terminate();
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    wss.close();
+  } catch {
+    /* ignore */
+  }
+  wss = null;
+}
+
 /** Push the current state to every connected overlay/control client. */
 export function broadcastState() {
   if (!wss) return;

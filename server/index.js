@@ -5,7 +5,7 @@ import express from "express";
 import { PUBLIC_DIR, CARDS_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./paths.js";
 import { logStartup } from "./startupLog.js";
 import { initDb } from "./db.js";
-import { initHub } from "./hub.js";
+import { initHub, closeHub } from "./hub.js";
 import { router } from "./routes.js";
 import { startStreamDeckSafe, stopStreamDeckSafe } from "./streamdeckApi.js";
 import { clearAppPid, registerShutdownForUpdate, writeAppPid } from "./update-shutdown.js";
@@ -81,8 +81,12 @@ export async function startServer(options = {}) {
   }
 
   const close = async () => {
-    await stopStreamDeckSafe();
+    await stopStreamDeckSafe({ quickClose: true });
     clearAppPid();
+    closeHub();
+    if (typeof server.closeAllConnections === "function") {
+      server.closeAllConnections();
+    }
     await new Promise((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });

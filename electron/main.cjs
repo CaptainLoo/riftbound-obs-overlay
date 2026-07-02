@@ -261,6 +261,10 @@ async function boot() {
   registerShutdownForUpdate(async () => {
     isQuitting = true;
     shuttingDown = true;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.destroy();
+      mainWindow = null;
+    }
     if (closeServer) await closeServer();
     destroyTray();
   });

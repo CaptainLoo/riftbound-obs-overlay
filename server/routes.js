@@ -7,7 +7,6 @@ import { buildState, broadcastState } from "./hub.js";
 import { DEVICES } from "./streamdeckLayout.js";
 import { getStreamDeckStatusSafe, reconnectStreamDeckSafe, queueStreamDeckRefreshImages } from "./streamdeckApi.js";
 import {
-  applyUpdate,
   checkForUpdate,
   downloadUpdate,
   getDownloadProgress,
@@ -15,6 +14,8 @@ import {
   getUpdateLog,
   getUpdateStatus,
   preflightUpdate,
+  prepareApplyUpdate,
+  runApplyShutdownAfterResponse,
 } from "./updater.js";
 import { isLocalRequest } from "./update-utils.js";
 
@@ -566,8 +567,21 @@ router.post("/update/apply", async (req, res) => {
     return res.status(403).json({ error: "Apply is only allowed from localhost." });
   }
   try {
-    const result = await applyUpdate(req.body?.applyToken);
-    res.json(result);
+    const prepared = await prepareApplyUpdate(req.body?.applyToken);
+    res.json({
+      ok: true,
+      message: "Applying update and restarting…",
+      expectedVersion: prepared.expectedVersion,
+      mode: prepared.mode,
+      logPath: prepared.logPath,
+    });
+    res.once("finish", () => {
+      setImmediate(() => {
+        runApplyShutdownAfterResponse(prepared).catch((err) => {
+          console.error("[update] apply shutdown failed:", err.message);
+        });
+      });
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -505,7 +505,7 @@ export function getDownloadProgress() {
   return readDownloadProgress();
 }
 
-export async function applyUpdate(applyTokenFromClient) {
+export async function prepareApplyUpdate(applyTokenFromClient) {
   if (!isUpdateSupported()) {
     throw new Error("Updates not supported on this platform.");
   }
@@ -526,35 +526,48 @@ export async function applyUpdate(applyTokenFromClient) {
 
   clearStaleLock();
   acquireLock("apply");
+
+  const pending = JSON.parse(readFileSync(pendingPath(), "utf8"));
+  const currentVersion = getVersion();
+  if (!pending.version || compareSemver(pending.version, currentVersion) <= 0) {
+    releaseLock();
+    cleanupStalePending(currentVersion);
+    throw new Error(
+      `Downloaded update v${pending.version || "?"} is not newer than v${currentVersion}.`
+    );
+  }
+
+  const installRoot = getInstallRoot().replace(/[\\/]+$/, "");
+  pending.restart = true;
+  pending.installRoot = installRoot;
+  pending.applyToken = applyTokenFromClient || getApplyToken();
+  pending.parentPid = process.pid;
+  writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
+
+  writeApplyStatus({
+    phase: "validated",
+    version: pending.version,
+    mode: pending.mode || "installer",
+    message: "Update validated — shutting down app…",
+    error: null,
+  });
+
+  return {
+    installRoot,
+    expectedVersion: pending.version,
+    mode: pending.mode || "installer",
+    logPath: logPath(),
+  };
+}
+
+/** Runs after the HTTP apply response is sent — avoids server.close() deadlock. */
+export async function runApplyShutdownAfterResponse(prepared) {
+  const { installRoot, expectedVersion, mode } = prepared;
   try {
-    const pending = JSON.parse(readFileSync(pendingPath(), "utf8"));
-    const currentVersion = getVersion();
-    if (!pending.version || compareSemver(pending.version, currentVersion) <= 0) {
-      cleanupStalePending(currentVersion);
-      throw new Error(
-        `Downloaded update v${pending.version || "?"} is not newer than v${currentVersion}.`
-      );
-    }
-
-    const installRoot = getInstallRoot().replace(/[\\/]+$/, "");
-    pending.restart = true;
-    pending.installRoot = installRoot;
-    pending.applyToken = applyTokenFromClient || getApplyToken();
-    pending.parentPid = process.pid;
-    writeFileSync(pendingPath(), JSON.stringify(pending, null, 2), "utf8");
-
-    writeApplyStatus({
-      phase: "validated",
-      version: pending.version,
-      mode: pending.mode || "installer",
-      message: "Update validated — shutting down app…",
-      error: null,
-    });
-
     writeApplyStatus({
       phase: "shutting_down",
-      version: pending.version,
-      mode: pending.mode || "installer",
+      version: expectedVersion,
+      mode,
       message: "Stopping server and Stream Deck worker…",
       error: null,
     });
@@ -565,8 +578,8 @@ export async function applyUpdate(applyTokenFromClient) {
 
     writeApplyStatus({
       phase: "spawned",
-      version: pending.version,
-      mode: pending.mode || "installer",
+      version: expectedVersion,
+      mode,
       message: "Launching updater…",
       error: null,
     });
@@ -579,30 +592,38 @@ export async function applyUpdate(applyTokenFromClient) {
     if (!spawned.ok) {
       writeApplyStatus({
         phase: "failed",
-        version: pending.version,
-        mode: pending.mode || "installer",
+        version: expectedVersion,
+        mode,
         message: spawned.error,
         error: spawned.error,
       });
-      throw new Error(spawned.error);
+      releaseLock();
+      return;
     }
 
     releaseLock();
     setTimeout(() => process.exit(0), 500);
-    return {
-      ok: true,
-      message: "Applying update and restarting…",
-      expectedVersion: pending.version,
-      mode: pending.mode || "installer",
-      logPath: logPath(),
-    };
   } catch (err) {
     releaseLock();
     writeApplyStatus({
       phase: "failed",
+      version: expectedVersion,
+      mode,
       message: err.message,
       error: err.message,
     });
-    throw err;
   }
+}
+
+/** @deprecated Use prepareApplyUpdate + runApplyShutdownAfterResponse */
+export async function applyUpdate(applyTokenFromClient) {
+  const prepared = await prepareApplyUpdate(applyTokenFromClient);
+  await runApplyShutdownAfterResponse(prepared);
+  return {
+    ok: true,
+    message: "Applying update and restarting…",
+    expectedVersion: prepared.expectedVersion,
+    mode: prepared.mode,
+    logPath: prepared.logPath,
+  };
 }
