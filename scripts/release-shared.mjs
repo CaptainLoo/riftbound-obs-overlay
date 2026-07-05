@@ -174,11 +174,28 @@ export function compareSemver(a, b) {
 
 export function bumpVersion(part = "patch") {
   const pkg = readPackageJson();
-  const [major, minor, patch] = pkg.version.split(".").map((n) => parseInt(n, 10) || 0);
+  const base = pkg.version.split("-")[0];
+  const [major, minor, patch] = base.split(".").map((n) => parseInt(n, 10) || 0);
   let next;
   if (part === "major") next = `${major + 1}.0.0`;
   else if (part === "minor") next = `${major}.${minor + 1}.0`;
   else next = `${major}.${minor}.${patch + 1}`;
+  pkg.version = next;
+  writeFileSync(join(ROOT, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
+  return next;
+}
+
+/** Bump to the next beta prerelease (e.g. 2.1.5 → 2.2.0-beta.1, 2.2.0-beta.1 → 2.2.0-beta.2). */
+export function bumpBetaVersion() {
+  const pkg = readPackageJson();
+  const betaMatch = pkg.version.match(/^(\d+\.\d+\.\d+)-beta\.(\d+)$/);
+  let next;
+  if (betaMatch) {
+    next = `${betaMatch[1]}-beta.${parseInt(betaMatch[2], 10) + 1}`;
+  } else {
+    const [major, minor] = pkg.version.split("-")[0].split(".").map((n) => parseInt(n, 10) || 0);
+    next = `${major}.${minor + 1}.0-beta.1`;
+  }
   pkg.version = next;
   writeFileSync(join(ROOT, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
   return next;

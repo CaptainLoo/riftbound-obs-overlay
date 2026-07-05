@@ -20,6 +20,7 @@
     "build:patch": "node scripts/build-patch.mjs",
     "build:installer": "node scripts/build-installer.mjs",
     "publish": "node scripts/publish-release.mjs",
+    "publish:beta": "node scripts/publish-release.mjs --beta",
     "setup:github": "node scripts/setup-github.mjs"
   },
   "engines": {
