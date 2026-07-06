@@ -1,0 +1,169 @@
+:root {
+  --bg: #0e1117;
+  --panel: #171c26;
+  --panel-2: #1f2632;
+  --border: #2b333f;
+  --text: #e6e9ef;
+  --muted: #8a93a3;
+  --accent: #6aa6ff;
+  --accent-2: #4d7fd6;
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse 80% 60% at 50% -10%, #1a2840 0%, var(--bg) 55%);
+  color: var(--text);
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+.home {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+}
+
+.home-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.home-header h1 {
+  margin: 0 0 8px;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.home-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.continue-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 32px;
+}
+
+.continue-wrap.hidden {
+  display: none;
+}
+
+.btn {
+  appearance: none;
+  border: none;
+  border-radius: var(--radius);
+  padding: 12px 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.continue-btn {
+  background: var(--accent-2);
+  color: #fff;
+}
+
+.continue-btn:hover {
+  background: var(--accent);
+}
+
+.game-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+}
+
+.game-card {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  padding: 28px 24px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 140px;
+}
+
+.game-card:hover {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+.game-card:active {
+  transform: scale(0.98);
+}
+
+.game-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.game-card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.game-card-icon.riftbound {
+  background: linear-gradient(135deg, #1a3a5c, #2d6a9f);
+  color: #c9e4ff;
+}
+
+.game-card-icon.pokemon {
+  background: linear-gradient(135deg, #8b1a1a, #e3350d);
+  color: #ffe8a3;
+}
+
+.game-card-name {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.game-card-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.home-hint {
+  margin: 40px 0 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.game-card.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.game-card.active-session {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}

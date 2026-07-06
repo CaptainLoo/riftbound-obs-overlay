@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
 import { exec } from "node:child_process";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import express from "express";
-import { PUBLIC_DIR, CARDS_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./paths.js";
+import { PUBLIC_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./paths.js";
 import { logStartup } from "./startupLog.js";
 import { initDb } from "./db.js";
 import { initHub, closeHub } from "./hub.js";
@@ -24,6 +25,13 @@ export async function startServer(options = {}) {
   try {
     await initDb();
     logStartup("initDb OK");
+    try {
+      const { ensureSetIndex } = await import("./pokemonSetIndex.js");
+      await ensureSetIndex();
+      logStartup("Pokemon set index OK");
+    } catch (err) {
+      logStartup("Pokemon set index skipped", err.message);
+    }
   } catch (err) {
     logStartup("initDb FAILED", err);
     throw err;
@@ -42,12 +50,13 @@ export async function startServer(options = {}) {
   app.use(express.json({ limit: "1mb" }));
 
   app.use("/api", router);
-  app.use("/cards", express.static(CARDS_DIR, { maxAge: "1h" }));
+  app.use("/cards", express.static(join(DATA_DIR, "cards"), { maxAge: "1h" }));
+  app.use("/home", express.static(`${PUBLIC_DIR}/home`));
   app.use("/control", express.static(`${PUBLIC_DIR}/control`));
   app.use("/overlay", express.static(`${PUBLIC_DIR}/overlay`));
   app.use("/shared", express.static(`${PUBLIC_DIR}/shared`));
   app.use("/preview", express.static(`${PUBLIC_DIR}/preview`));
-  app.get("/", (_req, res) => res.redirect("/control"));
+  app.get("/", (_req, res) => res.redirect("/home"));
 
   const server = createServer(app);
   initHub(server);
@@ -69,6 +78,7 @@ export async function startServer(options = {}) {
 
   console.log("Riftbound OBS Overlay");
   console.log(`  Overlay (Browser Source) : http://localhost:${port}/overlay`);
+  console.log(`  Home / game selection    : http://localhost:${port}/home`);
   console.log(`  Control panel            : http://localhost:${port}/control`);
   if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
   /* Stream Deck HID runs in a separate worker — auto-starts shortly after boot */
@@ -77,7 +87,7 @@ export async function startServer(options = {}) {
   }, 3000);
 
   if (openBrowser) {
-    exec(`start http://localhost:${port}/control`);
+    exec(`start http://localhost:${port}/home`);
   }
 
   const close = async () => {

@@ -12,6 +12,10 @@ const matchupEl = document.getElementById("matchup");
 const sceneEl = document.getElementById("scene");
 const layoutCssEl = document.getElementById("layout-runtime-css");
 const sceneHoleEl = document.getElementById("scene-hole");
+const pokemonOverlayEl = document.createElement("div");
+pokemonOverlayEl.id = "pokemon-overlay";
+pokemonOverlayEl.className = "pokemon-overlay hidden";
+document.body.appendChild(pokemonOverlayEl);
 
 const CARD_SLOTS = new Set(["p1.card", "p2.card"]);
 const HIDE_WHEN_EMPTY = new Set(["p1.card", "p2.card", "p1.battlefield", "p2.battlefield"]);
@@ -138,6 +142,60 @@ function playCardAnimation(el, type, side) {
 
 function escapeText(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function cardImage(card) {
+  return card?.imageLocal || card?.thumbLocal || "";
+}
+
+function prizeBalls(count) {
+  const n = Math.max(0, Math.min(6, Number(count) || 0));
+  return Array.from({ length: 6 }, (_, i) => `<span class="pkm-ball ${i < n ? "filled" : "spent"}"></span>`).join("");
+}
+
+function pokemonSideHtml(state, index, side) {
+  const player = state.players[index] || {};
+  const board = state.game?.pokemon?.[side] || {};
+  const active = board.active;
+  const img = cardImage(active);
+  const bench = Array.from({ length: 5 }, (_, i) => board.bench?.[i] || null);
+  return `
+    <section class="pokemon-side pokemon-${side}">
+      <header class="pkm-player">
+        <div>
+          <strong>${escapeText(player.pseudo || (side === "p1" ? "Player 1" : "Player 2"))}</strong>
+          <span>${escapeText(active?.name || "No active Pokémon")}</span>
+        </div>
+        <div class="pkm-prizes" aria-label="Prize cards left">${prizeBalls(state.game?.score?.[side])}</div>
+      </header>
+      <div class="pkm-active-card ${img ? "" : "empty"}">
+        ${img ? `<img src="${img}" alt="" />` : `<span>ACTIVE</span>`}
+      </div>
+      <div class="pkm-active-info">
+        <div class="pkm-active-title">
+          <strong>${escapeText(active?.name || "Choose an active Pokémon")}</strong>
+          <span>${escapeText(active?.hp ? `${active.hp} HP` : "")}</span>
+        </div>
+      </div>
+      <div class="pkm-bench">
+        ${bench
+          .map((card) => {
+            const benchImg = cardImage(card);
+            return `<div class="pkm-bench-card ${benchImg ? "" : "empty"}">${
+              benchImg ? `<img src="${benchImg}" alt="" /><span>${escapeText(card.name || "")}</span>` : `<span>EMPTY</span>`
+            }</div>`;
+          })
+          .join("")}
+      </div>
+    </section>`;
+}
+
+function renderPokemonOverlay(state) {
+  const show = state.meta?.gameId === "pokemon" && state.display?.mode !== "matchup";
+  pokemonOverlayEl.classList.toggle("hidden", !show);
+  stage.classList.toggle("pokemon-stage-hidden", show);
+  if (!show) return;
+  pokemonOverlayEl.innerHTML = `${pokemonSideHtml(state, 0, "p1")}${pokemonSideHtml(state, 1, "p2")}`;
 }
 
 function hashMatchup(state) {
@@ -311,11 +369,16 @@ function formatLabel(fmt) {
   return map[fmt] || String(fmt || "Bo3").toUpperCase();
 }
 
+function applyGameTheme(gameId) {
+  document.body.dataset.game = gameId || "riftbound";
+}
+
 function renderScene(state) {
+  applyGameTheme(state.meta?.gameId);
   const eventEl = document.getElementById("scene-event");
   if (!eventEl) return;
 
-  eventEl.textContent = `Riftbound · ${formatLabel(state.match.format)}`;
+  eventEl.textContent = `${state.meta?.gameName || "TCG"} · ${formatLabel(state.match.format)}`;
   document.getElementById("scene-score-p1").textContent = state.game.score.p1;
   document.getElementById("scene-score-p2").textContent = state.game.score.p2;
   document.getElementById("scene-game").textContent = `Game ${state.match.currentGame + 1}`;
@@ -370,12 +433,29 @@ function renderGameSlots(state, layout) {
   }
 }
 
-function render(state) {
-  renderScene(state);
+function render(state, info = { type: "state", sections: [] }) {
+  const sections = new Set(info.sections || []);
+  const isFull = info.type !== "patch";
+  const sceneChanged =
+    isFull || sections.has("meta") || sections.has("match") || sections.has("game");
+  const layoutChanged = isFull || sections.has("layout");
+  const displayChanged =
+    isFull ||
+    sections.has("display") ||
+    sections.has("players") ||
+    sections.has("game") ||
+    sections.has("match");
+
+  if (sceneChanged) renderScene(state);
+  renderPokemonOverlay(state);
 
   const layout = normalizeLayout(state.layout);
-  applyLayoutCss(layout);
-  applySceneCutout(layout);
+  if (layoutChanged) {
+    applyLayoutCss(layout);
+    applySceneCutout(layout);
+  }
+
+  if (!displayChanged && layoutChanged) return;
 
   const mode = state.display.mode === "matchup" ? "matchup" : "persistent";
   const prev = lastDisplayMode;

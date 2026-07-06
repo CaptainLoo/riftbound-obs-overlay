@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -75,5 +75,15 @@ function resolvePublicDir(root) {
 export const ROOT_DIR = getContentRoot();
 export const PUBLIC_DIR = resolvePublicDir(ROOT_DIR);
 export const DATA_DIR = IS_RELEASE ? userDataDir() : join(DEV_ROOT, "data");
+/** @deprecated Prefer getCardsDir(gameId) for per-game card storage. */
 export const CARDS_DIR = join(DATA_DIR, "cards");
 export const DB_FILE = join(DATA_DIR, "db.json");
+
+export function ensureCardsRoot() {
+  mkdirSync(join(DATA_DIR, "cards"), { recursive: true });
+}
+
+/** Per-game card image directory (e.g. data/cards/riftbound). */
+export function getCardsDir(gameId = "riftbound") {
+  return join(DATA_DIR, "cards", gameId);
+}

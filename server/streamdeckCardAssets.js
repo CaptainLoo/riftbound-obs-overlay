@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { db } from "./db.js";
-import { CARDS_DIR } from "./paths.js";
+import { getActiveGameData, getActiveGameId } from "./db.js";
+import { DATA_DIR, getCardsDir } from "./paths.js";
 import { repairCardAsset } from "./riftscribe.js";
 import { buildPages } from "./streamdeckLayout.js";
 import { runPool } from "./streamdeckImageWarm.js";
@@ -35,12 +35,19 @@ export function collectPageCardIds(page) {
   return [...ids];
 }
 
+function resolveCardFilePath(localPath) {
+  if (!localPath) return null;
+  const nested = localPath.match(/^\/cards\/([^/]+)\/(.+)$/);
+  if (nested) return join(DATA_DIR, "cards", nested[1], nested[2]);
+  return join(getCardsDir(getActiveGameId()), basename(localPath));
+}
+
 export function hasLocalCardAsset(cardId) {
-  const meta = db.data.cardsCache[cardId];
+  const meta = getActiveGameData().cardsCache[cardId];
   if (!meta) return false;
   for (const ref of [meta.thumbLocal, meta.imageLocal]) {
     if (!ref) continue;
-    if (existsSync(join(CARDS_DIR, basename(ref)))) return true;
+    if (existsSync(resolveCardFilePath(ref))) return true;
   }
   return false;
 }
@@ -65,6 +72,7 @@ export async function ensureCardAssets(cardIds, onProgress) {
   const failed = [];
   const repairedIds = [];
   let done = 0;
+  const cardsCache = getActiveGameData().cardsCache;
 
   const tasks = unique.map((id) => async () => {
     try {
@@ -87,7 +95,7 @@ export async function ensureCardAssets(cardIds, onProgress) {
     try {
       const { bakeStreamDeckThumb } = await import("./streamdeckImages.js");
       for (const id of repairedIds) {
-        await bakeStreamDeckThumb(id, db.data.cardsCache).catch(() => {});
+        await bakeStreamDeckThumb(id, cardsCache).catch(() => {});
       }
     } catch {
       /* ignore */

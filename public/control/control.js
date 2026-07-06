@@ -1,4 +1,3 @@
-import { connectState } from "/shared/ws.js";
 import {
   frameClass,
   heightForWidth,
@@ -10,58 +9,38 @@ import {
   TEXT_SLOTS,
   widthForHeight,
 } from "/shared/layout.js";
+import { api } from "./api.js";
+import {
+  CATEGORY_LABELS,
+  LIMITLESS_PLACEHOLDER,
+  POKEMON_INACTIVE_LAYOUT_SLOTS,
+  SLOT_LABELS,
+  SLOT_LABELS_POKEMON,
+} from "./constants.js";
+import { clamp, cssEscape, escapeAttr, escapeHtml } from "./utils.js";
+import { reloadData, startStateSocket, subscribeData } from "./state.js";
 
-const SLOT_LABELS = {
-  "p1.pseudo": "P1 · Name",
-  "p2.pseudo": "P2 · Name",
-  score: "Score",
-  "p1.legend": "P1 · Legend",
-  "p2.legend": "P2 · Legend",
-  "p1.battlefield": "P1 · Battlefield",
-  "p2.battlefield": "P2 · Battlefield",
-  "p1.champion": "P1 · Champion",
-  "p2.champion": "P2 · Champion",
-  "p1.card": "P1 · Show card",
-  "p2.card": "P2 · Show card",
-  playArea: "Play area (camera)",
-  "match.tally": "Match tally (1–0)",
-};
+function getSlotLabel(slotId) {
+  const labels = isPokemonMode() ? SLOT_LABELS_POKEMON : SLOT_LABELS;
+  return labels[slotId] || SLOT_LABELS[slotId] || slotId;
+}
 
-const CATEGORY_LABELS = {
-  legend: "Legend",
-  champions: "Champion",
-  maindeck: "Main deck",
-  battlefields: "Battlefields",
-  runes: "Runes",
-  sideboard: "Side deck",
-};
+function isPokemonInactiveLayoutSlot(slotId) {
+  return isPokemonMode() && POKEMON_INACTIVE_LAYOUT_SLOTS.has(slotId);
+}
+
+function isPokemonMode() {
+  return data?.activeGame === "pokemon";
+}
 
 let data = null;
 const previews = { p1: null, p2: null };
 const decklistText = { p1: "", p2: "" };
 const decklistFormat = { p1: "sections", p2: "sections" };
 let selectedSlot = null;
+let layoutEditorGameId = null;
 
 // ---- helpers --------------------------------------------------------------
-
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => res.statusText);
-    try {
-      const parsed = JSON.parse(txt);
-      throw new Error(parsed.error || txt);
-    } catch (err) {
-      if (err instanceof Error && err.message !== txt) throw err;
-      throw new Error(txt);
-    }
-  }
-  return res.status === 204 ? null : res.json();
-}
 
 const toastEl = document.getElementById("toast");
 let toastTimer = null;
@@ -85,12 +64,36 @@ function player(id) {
 }
 
 async function reload() {
-  data = await api("/api/data");
-  data.layout = normalizeLayout(data.layout);
+  data = await reloadData();
+  if (isPokemonMode()) {
+    for (const id of ["p1", "p2"]) {
+      if (decklistFormat[id] !== "limitless") decklistFormat[id] = "limitless";
+    }
+  }
+  updateGameBadge();
+  applyGameUi();
   renderPlayers();
   renderMatch();
   renderStreamDeck();
   syncLayoutFromData();
+}
+
+function applyGameUi() {
+  const selectionGrid = document.getElementById("selection-grid");
+  if (selectionGrid) {
+    selectionGrid.classList.remove("hidden");
+  }
+}
+
+function updateGameBadge() {
+  const badge = document.getElementById("game-badge");
+  if (!badge) return;
+  if (data?.gameName) {
+    badge.textContent = data.gameName;
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
 }
 
 // ---- Tabs -----------------------------------------------------------------
@@ -109,10 +112,18 @@ document.querySelectorAll(".tab").forEach((tab) => {
 function renderPlayers() {
   const grid = document.getElementById("players-grid");
   grid.innerHTML = "";
+  const pokemon = isPokemonMode();
   for (const id of ["p1", "p2"]) {
     const p = player(id);
     const block = document.createElement("div");
     block.className = "card-block";
+    const formatOptions = pokemon
+      ? `<option value="limitless" selected>Limitless (TCG)</option>`
+      : `<option value="sections" ${decklistFormat[id] === "sections" ? "selected" : ""}>Sectioned text</option>
+          <option value="tts" ${decklistFormat[id] === "tts" ? "selected" : ""}>TTS / Piltover</option>`;
+    const placeholder = pokemon
+      ? LIMITLESS_PLACEHOLDER
+      : "Legend:\n1 Legend\nChampion:\n1 Champion\nMainDeck:\n3 Card\nBattlefields:\n1 Battlefield\nRunes:\n6 Rune\nSideboard:\n2 Card";
     block.innerHTML = `
       <h2>${id === "p1" ? "Player 1" : "Player 2"}</h2>
       <div class="field">
@@ -120,15 +131,12 @@ function renderPlayers() {
         <input type="text" data-pseudo="${id}" value="${escapeAttr(p.pseudo)}" placeholder="Player name" />
       </div>
       <div class="field">
-        <label>Decklist (sectioned text)</label>
-        <textarea data-deck="${id}" placeholder="Legend:\n1 Legend\nChampion:\n1 Champion\nMainDeck:\n3 Card\nBattlefields:\n1 Battlefield\nRunes:\n6 Rune\nSideboard:\n2 Card">${escapeHtml(decklistText[id])}</textarea>
+        <label>Decklist${pokemon ? " (Limitless export)" : " (sectioned text)"}</label>
+        <textarea data-deck="${id}" placeholder="${escapeAttr(placeholder)}">${escapeHtml(decklistText[id])}</textarea>
       </div>
       <div class="row">
         <span class="inline-lbl">Format</span>
-        <select data-fmt="${id}" style="width: auto">
-          <option value="sections" ${decklistFormat[id] === "sections" ? "selected" : ""}>Sectioned text</option>
-          <option value="tts" ${decklistFormat[id] === "tts" ? "selected" : ""}>TTS / Piltover</option>
-        </select>
+        <select data-fmt="${id}" style="width: auto">${formatOptions}</select>
         <button class="btn" data-analyze="${id}">Analyze</button>
         <button class="btn ghost" data-save="${id}">Save deck</button>
         <span class="hint" data-deckinfo="${id}">${deckSummary(p.deck)}</span>
@@ -169,6 +177,13 @@ function renderPlayers() {
 function deckSummary(deck) {
   if (!deck) return "";
   const count = (a) => (a || []).reduce((s, e) => s + (e.quantity || 1), 0);
+  if (Array.isArray(deck.pokemon) || Array.isArray(deck.trainer) || Array.isArray(deck.energy)) {
+    const parts = [];
+    if (deck.pokemon?.length) parts.push(`${count(deck.pokemon)} Pokémon`);
+    if (deck.trainer?.length) parts.push(`${count(deck.trainer)} Trainer`);
+    if (deck.energy?.length) parts.push(`${count(deck.energy)} Energy`);
+    return parts.length ? `Deck saved: ${parts.join(", ")}` : "No deck saved";
+  }
   const parts = [];
   if (deck.legend) parts.push("legend ✓");
   if (deck.champions?.length) parts.push(`${deck.champions.length} champion`);
@@ -226,7 +241,7 @@ function renderPreview(id) {
           .join("");
         control = `<select data-pick="${cat}:${idx}">${options}</select>`;
       } else {
-        control = `<span class="unresolved">Not found: "${escapeHtml(entry.name)}"</span>`;
+        control = `<span class="unresolved">${escapeHtml(entry.error || `Not found: "${entry.name}"`)}</span>`;
       }
 
       row.innerHTML = `
@@ -260,23 +275,29 @@ async function saveDeck(id) {
       .filter((e) => e.chosen)
       .map((e) => ({ id: e.chosen, quantity: e.quantity }));
 
-  let champions = (preview.champions || []).filter((e) => e.chosen).map((e) => e.chosen);
-  // No explicit Champion section (e.g. TTS import): offer every Unit of the
-  // main deck as a champion candidate for the per-game selector.
-  if (!champions.length) {
-    champions = (preview.maindeck || [])
-      .filter((e) => e.chosen && e.candidates.find((c) => c.card_id === e.chosen)?.type === "Unit")
-      .map((e) => e.chosen);
+  let deck;
+  if (isPokemonMode()) {
+    deck = {
+      pokemon: mapEntries(preview.pokemon),
+      trainer: mapEntries(preview.trainer),
+      energy: mapEntries(preview.energy),
+    };
+  } else {
+    let champions = (preview.champions || []).filter((e) => e.chosen).map((e) => e.chosen);
+    if (!champions.length) {
+      champions = (preview.maindeck || [])
+        .filter((e) => e.chosen && e.candidates.find((c) => c.card_id === e.chosen)?.type === "Unit")
+        .map((e) => e.chosen);
+    }
+    deck = {
+      legend: preview.legend?.find((e) => e.chosen)?.chosen || null,
+      champions,
+      battlefields: mapEntries(preview.battlefields),
+      maindeck: mapEntries(preview.maindeck),
+      runes: mapEntries(preview.runes),
+      sideboard: mapEntries(preview.sideboard),
+    };
   }
-
-  const deck = {
-    legend: preview.legend?.find((e) => e.chosen)?.chosen || null,
-    champions,
-    battlefields: mapEntries(preview.battlefields),
-    maindeck: mapEntries(preview.maindeck),
-    runes: mapEntries(preview.runes),
-    sideboard: mapEntries(preview.sideboard),
-  };
 
   try {
     toast("Saving & downloading images…");
@@ -297,6 +318,7 @@ function renderMatch() {
   renderScore();
   renderGameButtons();
   renderSelections();
+  renderPokemonBoard();
   renderDisplay();
 }
 
@@ -396,22 +418,26 @@ function renderScore() {
   row.innerHTML = "";
   const gi = data.match.currentGame;
   const gscore = currentGameScore();
+  const pokemon = isPokemonMode();
   for (const id of ["p1", "p2"]) {
     const el = document.createElement("div");
     el.className = "score-player";
+    const scoreLabel = pokemon ? "Prizes left" : "Points";
+    const winButton = pokemon ? "" : `<button class="win-btn" data-win="${id}">Win game</button>`;
     el.innerHTML = `
       <span class="name">${escapeHtml(playerName(id))}</span>
+      <span class="hint">${scoreLabel}</span>
       <div class="stepper">
         <button data-score-dec="${id}">−</button>
         <span class="val">${gscore[id]}</span>
         <button data-score-inc="${id}">+</button>
       </div>
-      <button class="win-btn" data-win="${id}">Win game</button>`;
+      ${winButton}`;
     row.appendChild(el);
   }
   const label = document.createElement("span");
   label.className = "inline-lbl";
-  label.textContent = `Points · Game ${gi + 1}`;
+  label.textContent = `${isPokemonMode() ? "Prize cards" : "Points"} · Game ${gi + 1}`;
   row.appendChild(label);
   row.querySelectorAll("[data-score-inc]").forEach((b) =>
     b.addEventListener("click", () => changeScore(b.dataset.scoreInc, 1))
@@ -425,7 +451,8 @@ function renderScore() {
 }
 
 async function changeScore(id, delta) {
-  const next = Math.max(0, currentGameScore()[id] + delta);
+  const max = isPokemonMode() ? 6 : Number.POSITIVE_INFINITY;
+  const next = Math.min(max, Math.max(0, currentGameScore()[id] + delta));
   currentGameScore()[id] = next;
   updateScoreValues();
   await api("/api/match", { method: "POST", body: { score: { [id]: next } } });
@@ -443,7 +470,7 @@ function updateScoreValues() {
     if (vals[i]) vals[i].textContent = gscore[id];
   });
   const label = row.querySelector(".inline-lbl");
-  if (label) label.textContent = `Points · Game ${data.match.currentGame + 1}`;
+  if (label) label.textContent = `${isPokemonMode() ? "Prize cards" : "Points"} · Game ${data.match.currentGame + 1}`;
 }
 
 function renderGameButtons() {
@@ -458,6 +485,7 @@ function renderGameButtons() {
       data.match.currentGame = idx;
       renderGameButtons();
       renderSelections();
+      renderPokemonBoard();
       updateScoreValues();
     });
     wrap.appendChild(b);
@@ -466,7 +494,10 @@ function renderGameButtons() {
 
 function renderSelections() {
   const grid = document.getElementById("selection-grid");
-  grid.innerHTML = "";
+  if (!grid || isPokemonMode()) {
+    if (grid) grid.innerHTML = "";
+    return;
+  }
   const gi = data.match.currentGame;
   const game = data.match.games[gi];
 
@@ -507,6 +538,80 @@ function renderSelections() {
   });
 }
 
+function currentPokemonBoard() {
+  const game = data.match.games[data.match.currentGame];
+  game.pokemon ||= { p1: { active: null, bench: [] }, p2: { active: null, bench: [] } };
+  for (const id of ["p1", "p2"]) {
+    game.pokemon[id] ||= { active: null, bench: [] };
+    game.pokemon[id].bench = Array.isArray(game.pokemon[id].bench) ? game.pokemon[id].bench : [];
+  }
+  return game.pokemon;
+}
+
+function pokemonCardOptions(playerId, current) {
+  const cards = (player(playerId)?.displayCards || []).filter((c) => c.group === "Pokémon");
+  return (
+    `<option value="">— none —</option>` +
+    cards
+      .map(
+        (c) =>
+          `<option value="${escapeHtml(c.id)}" ${c.id === current ? "selected" : ""}>${escapeHtml(
+            c.label || cardName(c.id)
+          )}</option>`
+      )
+      .join("")
+  );
+}
+
+function renderPokemonBoard() {
+  const grid = document.getElementById("selection-grid");
+  if (!grid || !isPokemonMode()) return;
+  grid.innerHTML = "";
+  const board = currentPokemonBoard();
+  const gi = data.match.currentGame;
+
+  for (const id of ["p1", "p2"]) {
+    const side = board[id];
+    const block = document.createElement("div");
+    block.className = "card-block pokemon-board-control";
+    const benchRows = Array.from({ length: 5 }, (_, index) => {
+      const current = side.bench[index] || "";
+      return `
+        <div class="field">
+          <label>Bench ${index + 1}</label>
+          <select data-pokemon-bench="${id}:${index}">${pokemonCardOptions(id, current)}</select>
+        </div>`;
+    }).join("");
+    block.innerHTML = `
+      <h2>${escapeHtml(playerName(id))} — Pokémon board</h2>
+      <div class="field">
+        <label>Active Pokémon</label>
+        <select data-pokemon-active="${id}">${pokemonCardOptions(id, side.active || "")}</select>
+      </div>
+      <div class="pokemon-bench-controls">${benchRows}</div>`;
+    grid.appendChild(block);
+  }
+
+  grid.querySelectorAll("[data-pokemon-active], [data-pokemon-bench]").forEach((sel) => {
+    sel.addEventListener("change", () => savePokemonBoard(sel.dataset.pokemonActive || sel.dataset.pokemonBench.split(":")[0]));
+  });
+}
+
+async function savePokemonBoard(playerId) {
+  const active = document.querySelector(`[data-pokemon-active="${playerId}"]`)?.value || null;
+  const bench = [...document.querySelectorAll(`[data-pokemon-bench^="${playerId}:"]`)]
+    .map((sel) => sel.value)
+    .filter(Boolean);
+  await api("/api/match/pokemon-board", {
+    method: "POST",
+    body: { gameIndex: data.match.currentGame, player: playerId, active, bench },
+  });
+  const board = currentPokemonBoard();
+  board[playerId] = { active, bench: bench.filter((id) => id !== active).slice(0, 5) };
+  renderPokemonBoard();
+  toast("Pokémon board saved");
+}
+
 function optionList(ids, current) {
   const empty = `<option value="">— none —</option>`;
   const opts = ids
@@ -529,6 +634,37 @@ async function setCardAnimation(value) {
   toast("Animation: " + value);
 }
 
+function displayGroupOrder() {
+  return isPokemonMode()
+    ? ["Pokémon", "Trainer", "Energy"]
+    : ["Legend", "Champion", "Main deck", "Side deck"];
+}
+
+function buildDisplayOptgroups(cards, current) {
+  const byGroup = new Map();
+  for (const c of cards) {
+    if (!byGroup.has(c.group)) byGroup.set(c.group, []);
+    byGroup.get(c.group).push(c);
+  }
+  const groupOrder = displayGroupOrder();
+  const orderedGroups = [
+    ...groupOrder.filter((g) => byGroup.has(g)),
+    ...[...byGroup.keys()].filter((g) => !groupOrder.includes(g)),
+  ];
+  return orderedGroups
+    .map(
+      (label) =>
+        `<optgroup label="${escapeHtml(label)}">${byGroup
+          .get(label)
+          .map(
+            (c) =>
+              `<option value="${escapeHtml(c.id)}" ${c.id === current ? "selected" : ""}>${escapeHtml(c.label || cardName(c.id))}</option>`
+          )
+          .join("")}</optgroup>`
+    )
+    .join("");
+}
+
 function renderDisplay() {
   const grid = document.getElementById("display-grid");
   grid.innerHTML = "";
@@ -539,25 +675,7 @@ function renderDisplay() {
 
     const current = data.display?.cards?.[id] || "";
     const cards = p.displayCards || [];
-    const groupOrder = ["Legend", "Champion", "Main deck", "Side deck"];
-    const byGroup = new Map();
-    for (const c of cards) {
-      if (!byGroup.has(c.group)) byGroup.set(c.group, []);
-      byGroup.get(c.group).push(c);
-    }
-    const optgroups = groupOrder
-      .filter((g) => byGroup.has(g))
-      .map(
-        (label) =>
-          `<optgroup label="${label}">${byGroup
-            .get(label)
-            .map(
-              (c) =>
-                `<option value="${c.id}" ${c.id === current ? "selected" : ""}>${escapeHtml(c.label || cardName(c.id))}</option>`
-            )
-            .join("")}</optgroup>`
-      )
-      .join("");
+    const optgroups = buildDisplayOptgroups(cards, current);
 
     block.innerHTML = `
       <label>${escapeHtml(playerName(id))} — show a card</label>
@@ -958,11 +1076,12 @@ function buildLayoutEditor() {
   handles.innerHTML = "";
   data.layout = normalizeLayout(data.layout);
   for (const [slotId, cfg] of Object.entries(data.layout)) {
+    if (isPokemonInactiveLayoutSlot(slotId)) continue;
     const el = document.createElement("div");
     const fc = frameClass(slotId);
     el.className = `lslot${fc ? ` lslot-frame ${fc}` : " lslot-text"}${slotId === "playArea" ? " lslot-play" : ""}`;
     el.dataset.slot = slotId;
-    el.innerHTML = `<span>${SLOT_LABELS[slotId] || slotId}</span><div class="handle"></div>`;
+    el.innerHTML = `<span>${getSlotLabel(slotId)}</span><div class="handle"></div>`;
     positionSlot(el, cfg);
     attachDrag(el, slotId);
     handles.appendChild(el);
@@ -980,8 +1099,13 @@ function positionSlot(el, cfg) {
 }
 
 function syncLayoutFromData() {
+  const gameId = data?.activeGame ?? null;
+  const needsRebuild = layoutEditorGameId !== gameId;
+  layoutEditorGameId = gameId;
+
   const handles = layoutHandlesEl();
-  if (!handles?.children.length) {
+  if (!handles?.children.length || needsRebuild) {
+    if (selectedSlot && isPokemonInactiveLayoutSlot(selectedSlot)) selectedSlot = null;
     buildLayoutEditor();
     return;
   }
@@ -1095,7 +1219,7 @@ function renderProps() {
   const isText = TEXT_SLOTS.has(selectedSlot);
 
   body.innerHTML = `
-    <p class="hint">${SLOT_LABELS[selectedSlot] || selectedSlot}</p>
+    <p class="hint">${getSlotLabel(selectedSlot)}</p>
     <div class="prop-grid">
       <div><label>X %</label><input type="number" step="0.5" data-prop="x" value="${round(cfg.x)}" /></div>
       <div><label>Y %</label><input type="number" step="0.5" data-prop="y" value="${round(cfg.y)}" /></div>
@@ -1157,59 +1281,46 @@ document.getElementById("reset-layout").addEventListener("click", async () => {
   toast("Layout reset");
 });
 
-// ---- utils ----------------------------------------------------------------
-
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
-function escapeHtml(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-function escapeAttr(s) {
-  return escapeHtml(s);
-}
-function cssEscape(s) {
-  return s.replace(/([.:])/g, "\\$1");
-}
-
 // ---- boot -----------------------------------------------------------------
 
-// Live updates: refresh score/game display if changed elsewhere (e.g. Companion).
-connectState((state) => {
+// Live updates: refresh only the panels affected by WS state patches.
+subscribeData((nextData, info = { type: "state", sections: [] }) => {
+  data = nextData;
   if (!data) return;
-  data.match.score = state.match.score; // games won
-  data.match.currentGame = state.match.currentGame;
-  const g = data.match.games[state.match.currentGame];
-  if (g && state.game?.score) g.score = { p1: state.game.score.p1, p2: state.game.score.p2 };
-  data.display = data.display || {};
-  data.display.mode = state.display.mode;
-  if (state.display.cardAnimation) data.display.cardAnimation = state.display.cardAnimation;
-  syncCardAnimation();
-  if (state.layout && !layoutDragging) {
-    data.layout = normalizeLayout(state.layout);
+  const sections = new Set(info.sections || []);
+  const isFull = info.type !== "patch";
+
+  if (isFull || sections.has("display")) {
+    syncCardAnimation();
+    updateHideCardButtons();
+    const matchTab = document.getElementById("tab-match");
+    if (matchTab && matchTab.classList.contains("active")) renderDisplay();
+  }
+
+  if ((isFull || sections.has("layout")) && !layoutDragging) {
     syncLayoutFromData();
     if (selectedSlot) renderProps();
   }
-  if (state.display?.cards) {
-    data.display = data.display || {};
-    data.display.cards = {
-      p1: state.display.cards.p1?.id ?? null,
-      p2: state.display.cards.p2?.id ?? null,
-    };
-    updateHideCardButtons();
-  }
+
   const matchTab = document.getElementById("tab-match");
-  if (matchTab && matchTab.classList.contains("active")) {
+  if (matchTab && matchTab.classList.contains("active") && (isFull || sections.has("match") || sections.has("game"))) {
     updateMatchMeta();
     renderTally();
     updateScoreValues();
     renderGameButtons();
+    renderPokemonBoard();
   }
 });
+
+startStateSocket();
 
 reload()
   .then(() => buildLayoutEditor())
   .catch((err) => toast("Failed to load: " + err.message, "err"));
+
+document.getElementById("change-game")?.addEventListener("click", () => {
+  window.location.href = "/home";
+});
 
 // ---- In-app updates (Windows portable / installer) ------------------------
 

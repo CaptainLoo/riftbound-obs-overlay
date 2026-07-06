@@ -15,6 +15,7 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "dev:electron": "electron .",
+    "test": "node --test tests/*.test.mjs",
     "build:electron": "node scripts/build-electron.mjs",
     "build:win": "node scripts/build-win.mjs",
     "build:patch": "node scripts/build-patch.mjs",

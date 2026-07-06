@@ -1,6 +1,4 @@
-import { platform } from "node:os";
-import { IS_ELECTRON } from "./paths.js";
-import { db } from "./db.js";
+import { getActiveGameData } from "./db.js";
 import { buildPages, detectDeviceKey } from "./streamdeckLayout.js";
 import {
   collectPageCardIds,
@@ -25,6 +23,11 @@ import {
   snapshotRevision,
 } from "./streamdeckRevision.js";
 import { logStartup } from "./startupLog.js";
+import {
+  defaultStreamDeckStatus,
+  formatStreamDeckError,
+  resetStreamDeckStatusPatch,
+} from "./streamdeck/status.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 const API = `http://127.0.0.1:${DEFAULT_PORT}/api`;
@@ -62,39 +65,7 @@ let deviceKey = "xl";
 let keySize = 96;
 let refreshTimer = null;
 let refreshInFlight = false;
-let status = {
-  supported: platform() === "win32" && IS_ELECTRON,
-  connected: false,
-  phase: "idle",
-  model: null,
-  productName: null,
-  serialNumber: null,
-  firmwareVersion: null,
-  deviceKey: "xl",
-  currentPage: 0,
-  pageCount: 0,
-  pageNames: [],
-  error: null,
-  devicesFound: [],
-  lastScanAt: null,
-  drawProgress: null,
-  imagesReady: false,
-  imagesDegraded: false,
-  imageUploadOk: null,
-  imageUploadError: null,
-  imagesDrawnCount: 0,
-  imagesFailedCount: 0,
-  cardPrefetch: null,
-  cardsReady: 0,
-  cardsTotal: 0,
-  cardsMissing: [],
-  refreshMode: null,
-  uploadMode: null,
-  panelRenderMs: null,
-  panelEncodeMs: null,
-  panelUploadMs: null,
-  hint: null,
-};
+let status = defaultStreamDeckStatus();
 
 let lastRevision = null;
 let imageDrawGeneration = 0;
@@ -109,13 +80,7 @@ export function setStreamDeckStatusListener(fn) {
   statusListener = fn;
 }
 
-function formatError(err) {
-  const msg = err?.message || String(err);
-  if (/could not open|cannot open|access|busy|in use/i.test(msg)) {
-    return "Stream Deck busy — quit the Elgato Stream Deck app completely, then restart Riftbound OBS.";
-  }
-  return msg;
-}
+const formatError = formatStreamDeckError;
 
 export async function preflightNativeModules() {
   setStatus({ phase: "loading", error: null, connected: false });
@@ -296,7 +261,7 @@ async function prefetchCardAssets(cardIds) {
 }
 
 async function prefetchForCurrentContext() {
-  const allIds = collectStreamDeckCardIds(db.data, deviceKey);
+  const allIds = collectStreamDeckCardIds(getActiveGameData(), deviceKey);
   const page = pages[currentPageIndex];
   const pageIds = page ? collectPageCardIds(page) : [];
   const priorityIds = [...new Set([...pageIds, ...allIds])];
@@ -435,13 +400,13 @@ function scheduleAdjacentWarm() {
   setImmediate(async () => {
     try {
       const { renderKeyImage, getIconColorForKeyDef } = await loadImagesMod();
-      await warmAdjacentPages(pages, currentPageIndex, db.data.cardsCache, keySize, renderKeyImage);
+      await warmAdjacentPages(pages, currentPageIndex, getActiveGameData().cardsCache, keySize, renderKeyImage);
       if (typeof deck.fillPanelBuffer === "function") {
         await warmAdjacentPanelPages(
           deck,
           pages,
           currentPageIndex,
-          db.data.cardsCache,
+          getActiveGameData().cardsCache,
           renderKeyImage,
           getIconColorForKeyDef
         );
@@ -470,7 +435,7 @@ async function renderKeysBatch(indices, page, generation, { onProgress } = {}) {
 
         try {
           const rgb = await withTimeout(
-            renderKeyImage(keyDef, db.data.cardsCache, keySize),
+            renderKeyImage(keyDef, getActiveGameData().cardsCache, keySize),
             KEY_RENDER_TIMEOUT_MS,
             `Key ${idx} render`
           );
@@ -669,7 +634,7 @@ async function drawCurrentPageViaPanel(generation, { showProgress = true } = {})
     const rgbPanel = await renderPagePanel(
       deck,
       page,
-      db.data.cardsCache,
+      getActiveGameData().cardsCache,
       renderKeyImage,
       getIconColorForKeyDef,
       { concurrency: RENDER_CONCURRENCY }
@@ -826,7 +791,7 @@ async function drawCurrentPage() {
 async function rebuildPages(resetPage = false) {
   if (!deck) return;
   deviceKey = detectDeviceKey(deck);
-  pages = buildPages(db.data, deviceKey);
+  pages = buildPages(getActiveGameData(), deviceKey);
   if (resetPage || currentPageIndex >= pages.length) currentPageIndex = 0;
   setStatus({
     deviceKey,
@@ -844,7 +809,7 @@ export async function refreshStreamDeck(force = false) {
   try {
     deviceKey = detectDeviceKey(deck);
     const oldPages = pages;
-    const mode = force ? "full" : classifyStreamDeckRefresh(lastRevision, db.data, deviceKey);
+    const mode = force ? "full" : classifyStreamDeckRefresh(lastRevision, getActiveGameData(), deviceKey);
 
     if (mode === "skip" && !force) {
       setStatus({ refreshMode: "skip" });
@@ -857,9 +822,9 @@ export async function refreshStreamDeck(force = false) {
       clearPanelHidCache();
     }
 
-    pages = buildPages(db.data, deviceKey);
+    pages = buildPages(getActiveGameData(), deviceKey);
     if (currentPageIndex >= pages.length) currentPageIndex = 0;
-    lastRevision = snapshotRevision(db.data, deviceKey);
+    lastRevision = snapshotRevision(getActiveGameData(), deviceKey);
 
     setStatus({
       deviceKey,
@@ -1005,8 +970,8 @@ export async function startStreamDeck() {
 
     deviceKey = detectDeviceKey(deck);
     currentPageIndex = 0;
-    pages = buildPages(db.data, deviceKey);
-    lastRevision = snapshotRevision(db.data, deviceKey);
+    pages = buildPages(getActiveGameData(), deviceKey);
+    lastRevision = snapshotRevision(getActiveGameData(), deviceKey);
 
     setStatus({
       error: null,
@@ -1076,33 +1041,5 @@ export async function stopStreamDeck() {
   pages = [];
   currentPageIndex = 0;
   lastRevision = null;
-  setStatus({
-    connected: false,
-    phase: "idle",
-    model: null,
-    productName: null,
-    serialNumber: null,
-    firmwareVersion: null,
-    pageCount: 0,
-    pageNames: [],
-    currentPage: 0,
-    error: null,
-    drawProgress: null,
-    imagesReady: false,
-    imagesDegraded: false,
-    imageUploadOk: null,
-    imageUploadError: null,
-    imagesDrawnCount: 0,
-    imagesFailedCount: 0,
-    cardPrefetch: null,
-    cardsReady: 0,
-    cardsTotal: 0,
-    cardsMissing: [],
-    hint: null,
-    refreshMode: null,
-    uploadMode: null,
-    panelRenderMs: null,
-    panelEncodeMs: null,
-    panelUploadMs: null,
-  });
+  setStatus(resetStreamDeckStatusPatch());
 }

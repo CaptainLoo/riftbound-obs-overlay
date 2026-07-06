@@ -1,8 +1,8 @@
 import { writeFile, access } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, extname } from "node:path";
-import { db } from "./db.js";
-import { CARDS_DIR } from "./paths.js";
+import { getActiveGameData, getActiveGameId } from "./db.js";
+import { getCardsDir } from "./paths.js";
 
 const API_BASE = "https://riftscribe.gg/api";
 
@@ -27,6 +27,10 @@ export async function fetchCardDetail(cardId) {
   return fetchJson(`${API_BASE}/cards/${encodeURIComponent(cardId)}`);
 }
 
+function cardsDir() {
+  return getCardsDir(getActiveGameId());
+}
+
 function fileExists(path) {
   return access(path).then(
     () => true,
@@ -38,15 +42,16 @@ async function downloadImage(url, cardId, suffix) {
   if (!url) return null;
   const ext = extname(new URL(url).pathname) || ".png";
   const fileName = `${cardId}${suffix}${ext}`;
-  const dest = join(CARDS_DIR, fileName);
+  const dir = cardsDir();
+  const dest = join(dir, fileName);
   if (!(await fileExists(dest))) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Image download failed (${res.status}) for ${url}`);
     const buf = Buffer.from(await res.arrayBuffer());
     await writeFile(dest, buf);
   }
-  // Served by express static middleware mounted at /cards.
-  return `/cards/${fileName}`;
+  const gameId = getActiveGameId();
+  return `/cards/${gameId}/${fileName}`;
 }
 
 /**
@@ -55,30 +60,33 @@ async function downloadImage(url, cardId, suffix) {
  */
 function localAssetExists(localPath) {
   if (!localPath) return false;
-  const file = localPath.replace(/^\/cards\//, "");
-  return existsSync(join(CARDS_DIR, file));
+  const file = localPath.replace(/^\/cards\/[^/]+\//, "").replace(/^\/cards\//, "");
+  return existsSync(join(cardsDir(), file));
 }
 
 /** Re-download a card when cache metadata exists but files are missing on disk. */
 export async function repairCardAsset(cardId) {
-  const entry = db.data.cardsCache[cardId];
+  const gameData = getActiveGameData();
+  const entry = gameData.cardsCache[cardId];
   if (entry) {
     const thumbOk = localAssetExists(entry.thumbLocal);
     const imageOk = localAssetExists(entry.imageLocal);
     if (thumbOk || imageOk) return entry;
-    delete db.data.cardsCache[cardId];
+    delete gameData.cardsCache[cardId];
+    const { db } = await import("./db.js");
     await db.write();
   }
   return cacheCard(cardId);
 }
 
 export async function cacheCard(cardId) {
-  const existing = db.data.cardsCache[cardId];
+  const gameData = getActiveGameData();
+  const existing = gameData.cardsCache[cardId];
   if (existing) {
     if (localAssetExists(existing.thumbLocal) || localAssetExists(existing.imageLocal)) {
       return existing;
     }
-    delete db.data.cardsCache[cardId];
+    delete gameData.cardsCache[cardId];
   }
 
   const detail = await fetchCardDetail(cardId);
@@ -100,11 +108,12 @@ export async function cacheCard(cardId) {
     thumbLocal: thumbLocal || imageLocal,
   };
 
-  db.data.cardsCache[id] = entry;
+  gameData.cardsCache[id] = entry;
+  const { db } = await import("./db.js");
   await db.write();
   try {
     const { bakeStreamDeckThumb } = await import("./streamdeckImages.js");
-    await bakeStreamDeckThumb(id, db.data.cardsCache);
+    await bakeStreamDeckThumb(id, gameData.cardsCache);
   } catch (err) {
     console.warn(`[cache] sd96 bake ${id}: ${err.message}`);
   }
@@ -112,5 +121,5 @@ export async function cacheCard(cardId) {
 }
 
 export function getCachedCard(cardId) {
-  return db.data.cardsCache[cardId] || null;
+  return getActiveGameData().cardsCache[cardId] || null;
 }

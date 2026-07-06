@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TCG Overlay — Choisir un jeu</title>
+    <link rel="stylesheet" href="home.css" />
+  </head>
+  <body>
+    <main class="home">
+      <header class="home-header">
+        <h1>TCG Overlay</h1>
+        <p class="home-subtitle">Choisissez le jeu pour configurer votre overlay OBS.</p>
+      </header>
+
+      <div id="continue-wrap" class="continue-wrap hidden">
+        <button type="button" class="btn continue-btn" id="continue-btn">
+          Continuer avec <span id="continue-game-name"></span>
+        </button>
+      </div>
+
+      <div class="game-grid" id="game-grid" aria-label="Jeux disponibles"></div>
+
+      <p class="home-hint">Chaque jeu conserve ses propres decks, matchs et mise en page.</p>
+    </main>
+
+    <script type="module" src="home.js"></script>
+  </body>
+</html>

@@ -195,7 +195,7 @@ function createWindow(port) {
     height: 900,
     minWidth: 960,
     minHeight: 640,
-    title: "Riftbound OBS — Control",
+    title: "TCG Overlay",
     icon: trayIconPath(),
     autoHideMenuBar: false,
     show: false,
@@ -220,8 +220,8 @@ function createWindow(port) {
     }
   });
 
-  mainWindow.loadURL(`http://127.0.0.1:${port}/control`).catch((err) => {
-    showStartupError("Control panel failed to load", err?.message || String(err));
+  mainWindow.loadURL(`http://127.0.0.1:${port}/home`).catch((err) => {
+    showStartupError("Home screen failed to load", err?.message || String(err));
   });
 
   mainWindow.on("closed", () => {

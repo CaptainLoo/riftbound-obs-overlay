@@ -1,6 +1,8 @@
 import { WebSocketServer } from "ws";
-import { db, FORMATS } from "./db.js";
-import { getCachedCard } from "./riftscribe.js";
+import { getActiveGameData, getActiveGameId, FORMATS } from "./db.js";
+import { getGame } from "./games.js";
+import { getCachedCard } from "./cardProvider.js";
+import { getGameAdapter } from "./gameAdapters/index.js";
 
 let wss = null;
 
@@ -9,22 +11,35 @@ function card(id) {
   return getCachedCard(id);
 }
 
-/** Build the overlay-facing state, resolving card ids to cached card data. */
-export function buildState() {
-  const { players, match, display, layout } = db.data;
+function pokemonSide(side = {}) {
+  return {
+    active: card(side.active),
+    bench: (Array.isArray(side.bench) ? side.bench : []).map(card).filter(Boolean),
+  };
+}
+
+function getStateContext() {
+  const gameData = getActiveGameData();
+  const { players, match, display, layout, cardsCache } = gameData;
+  const gameId = getActiveGameId();
+  const gameInfo = getGame(gameId);
+  const adapter = getGameAdapter(gameId);
   const game = match.games[match.currentGame] || { battlefield: {}, champion: {}, score: {} };
   const toWin = (FORMATS[match.format] || FORMATS.bo3).win;
   const winner =
     match.score.p1 >= toWin ? "p1" : match.score.p2 >= toWin ? "p2" : null;
+  return { players, match, display, layout, cardsCache, gameId, gameInfo, adapter, game, toWin, winner };
+}
 
+export function buildStateSections() {
+  const { players, match, display, layout, cardsCache, gameId, gameInfo, adapter, game, toWin, winner } =
+    getStateContext();
   return {
-    players: players.map((p) => ({
-      id: p.id,
-      pseudo: p.pseudo,
-      legend: card(p.deck.legend),
-      champion: card((p.deck.champions || [])[0]),
-      battlefields: (p.deck.battlefields || []).map((e) => card(e.id)).filter(Boolean),
-    })),
+    meta: {
+      gameId,
+      gameName: gameInfo?.name || gameId,
+    },
+    players: adapter.buildOverlayPlayers(players, cardsCache),
     match: {
       format: match.format,
       score: match.score,
@@ -42,10 +57,13 @@ export function buildState() {
         p1: card(game.champion?.p1),
         p2: card(game.champion?.p2),
       },
-      // Per-game points shown live on the overlay.
       score: {
         p1: game.score?.p1 || 0,
         p2: game.score?.p2 || 0,
+      },
+      pokemon: {
+        p1: pokemonSide(game.pokemon?.p1),
+        p2: pokemonSide(game.pokemon?.p2),
       },
     },
     display: {
@@ -64,6 +82,11 @@ export function buildState() {
   };
 }
 
+/** Build the overlay-facing state, resolving card ids to cached card data. */
+export function buildState() {
+  return buildStateSections();
+}
+
 export function initHub(server) {
   wss = new WebSocketServer({ server, path: "/ws" });
   wss.on("connection", (socket) => {
@@ -71,32 +94,36 @@ export function initHub(server) {
   });
 }
 
-/** Terminate WebSocket clients so HTTP server.close() does not hang during updates. */
 export function closeHub() {
-  if (!wss) return;
-  for (const client of wss.clients) {
-    try {
-      client.terminate();
-    } catch {
-      /* ignore */
-    }
-  }
-  try {
+  if (wss) {
     wss.close();
-  } catch {
-    /* ignore */
+    wss = null;
   }
-  wss = null;
 }
 
-/** Push the current state to every connected overlay/control client. */
 export function broadcastState() {
   if (!wss) return;
   const message = JSON.stringify({ type: "state", state: buildState() });
   for (const client of wss.clients) {
     if (client.readyState === 1) client.send(message);
   }
-  import("./streamdeckApi.js")
-    .then((m) => m.refreshStreamDeckIfConnectedSafe())
-    .catch(() => {});
+}
+
+export function buildPatch(...sections) {
+  const full = buildStateSections();
+  const patch = {};
+  for (const section of sections.flat()) {
+    if (section in full) patch[section] = full[section];
+  }
+  return patch;
+}
+
+export function broadcastPatch(sections) {
+  if (!wss) return;
+  const list = Array.isArray(sections) ? sections : [sections];
+  const patch = buildPatch(list);
+  const message = JSON.stringify({ type: "patch", patch, sections: Object.keys(patch) });
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(message);
+  }
 }
