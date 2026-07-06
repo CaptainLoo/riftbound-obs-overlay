@@ -77,6 +77,156 @@ function enrichSelectGameDef(def, data) {
   return def;
 }
 
+function isPokemonData(data) {
+  return data?.meta?.gameId === "pokemon" || data?.gameId === "pokemon" || Array.isArray(data?.players?.[0]?.deck?.pokemon);
+}
+
+function pokemonEntries(player, cardsCache = {}) {
+  return (player?.deck?.pokemon || []).map((entry, index) => {
+    const card = cardsCache[entry.id] || {};
+    const quantity = Number(entry.quantity) || 1;
+    const name = card.name || entry.id;
+    return {
+      id: entry.id,
+      index,
+      quantity,
+      name,
+      label: quantity > 1 ? `${name} ×${quantity}` : name,
+    };
+  });
+}
+
+function pokemonBoardSide(data, playerId) {
+  const game = data.match?.games?.[data.match?.currentGame ?? 0] || {};
+  const side = game.pokemon?.[playerId] || {};
+  return {
+    active: side.active || null,
+    bench: Array.isArray(side.bench) ? side.bench : [],
+  };
+}
+
+function pokemonSlotLabel(slot, benchIndex) {
+  return slot === "active" ? "Active" : `Bench ${Number(benchIndex) + 1}`;
+}
+
+function pageSlug(playerId, slot, benchIndex = null, pageNum = 1) {
+  const slotPart = slot === "active" ? "active" : `bench${Number(benchIndex) + 1}`;
+  return `pokemon:${playerId}:${slotPart}:${pageNum}`;
+}
+
+function putPlayerBoardKeys(keys, device, player, data, playerIndex) {
+  const playerId = player.id;
+  const side = pokemonBoardSide(data, playerId);
+  const slots = [
+    { slot: "active", benchIndex: null, col: 0, row: 1 },
+    { slot: "bench", benchIndex: 0, col: 1, row: 1 },
+    { slot: "bench", benchIndex: 1, col: 2, row: 1 },
+    { slot: "bench", benchIndex: 2, col: 3, row: 1 },
+    { slot: "bench", benchIndex: 3, col: 4, row: 1 },
+    { slot: "bench", benchIndex: 4, col: 5, row: 1 },
+  ];
+
+  const maxCol = device.cols - 1;
+  const baseRow = device.rows >= 4 ? 1 : 0;
+  slots.forEach((entry, i) => {
+    const col = device.cols >= 8 ? entry.col : i % device.cols;
+    const row = device.cols >= 8 ? entry.row : baseRow + Math.floor(i / device.cols);
+    if (col > maxCol || row >= device.rows) return;
+    const currentId = entry.slot === "active" ? side.active : side.bench[entry.benchIndex];
+    const name = currentId ? cardsCacheName(data.cardsCache, currentId) : "Empty";
+    const label = `${pokemonSlotLabel(entry.slot, entry.benchIndex)}\n${shortName(name, 14)}`;
+    putKey(keys, device, col, row, {
+      type: "gotoPage",
+      label,
+      icon: entry.slot === "active" ? "pokemonActive" : "pokemonBench",
+      active: Boolean(currentId),
+      settings: {
+        pageName: pageSlug(playerId, entry.slot, entry.benchIndex),
+        player: playerId,
+        slot: entry.slot,
+        benchIndex: entry.benchIndex,
+      },
+    });
+  });
+
+  const other = playerIndex === 0 ? data.players?.[1] : data.players?.[0];
+  if (other && device.cols >= 3) {
+    putKey(keys, device, device.cols - 2, 0, {
+      type: "gotoPage",
+      label: `${shortName(other.pseudo || other.id, 12)} Board`,
+      icon: "pokemonSlot",
+      settings: { pageName: `pokemon:${other.id}:board` },
+    });
+  }
+}
+
+function cardsCacheName(cardsCache, cardId) {
+  return cardsCache?.[cardId]?.name || cardId;
+}
+
+function buildPokemonPages(data, device) {
+  const pages = [];
+  const slots = cardSlotIndices(device);
+  const players = data.players || [];
+
+  for (const [playerIndex, player] of players.entries()) {
+    const pokemon = pokemonEntries(player, data.cardsCache);
+    const playerName = player.pseudo || player.id;
+    const boardKeys = new Map();
+    putKey(boardKeys, device, 0, 0, { type: "hideAll", label: "Hide all", icon: "hide" });
+    putKey(boardKeys, device, 1, 0, { type: "matchup", label: "Matchup", icon: "matchup" });
+    putKey(boardKeys, device, 2, 0, {
+      type: "gamePoint",
+      label: enrichGamePointLabel({ settings: { player: player.id, delta: 1 } }, data),
+      icon: "pokemonPrize",
+      settings: { player: player.id, delta: 1 },
+    });
+    putKey(boardKeys, device, 3, 0, {
+      type: "gamePoint",
+      label: enrichGamePointLabel({ settings: { player: player.id, delta: -1 } }, data),
+      icon: "pokemonPrize",
+      settings: { player: player.id, delta: -1 },
+    });
+    putPlayerBoardKeys(boardKeys, device, player, data, playerIndex);
+    addNavigation(boardKeys, device);
+    pages.push({ name: `pokemon:${player.id}:board`, label: `${playerName} Board`, keys: boardKeys });
+
+    const boardSlots = [
+      { slot: "active", benchIndex: null },
+      ...Array.from({ length: 5 }, (_, benchIndex) => ({ slot: "bench", benchIndex })),
+    ];
+    for (const boardSlot of boardSlots) {
+      for (let offset = 0; offset < pokemon.length; offset += slots.length) {
+        const chunk = pokemon.slice(offset, offset + slots.length);
+        const pageNum = Math.floor(offset / slots.length) + 1;
+        const keys = new Map();
+        chunk.forEach((card, i) => {
+          keys.set(slots[i], {
+            type: "pokemonBoardSet",
+            label: shortName(card.label || card.name, 22),
+            cardId: card.id,
+            settings: {
+              player: player.id,
+              cardId: card.id,
+              slot: boardSlot.slot,
+              benchIndex: boardSlot.benchIndex,
+              returnPageName: `pokemon:${player.id}:board`,
+            },
+          });
+        });
+        addNavigation(keys, device);
+        pages.push({
+          name: pageSlug(player.id, boardSlot.slot, boardSlot.benchIndex, pageNum),
+          label: `${playerName} ${pokemonSlotLabel(boardSlot.slot, boardSlot.benchIndex)}${pageNum > 1 ? ` ${pageNum}` : ""}`,
+          keys,
+        });
+      }
+    }
+  }
+
+  return pages;
+}
+
 function buildControlKeys(device, data) {
   const keys = new Map();
   const p1 = data.players?.[0];
@@ -210,6 +360,8 @@ function buildControlKeys(device, data) {
  */
 export function buildPages(data, deviceKey = "xl") {
   const device = DEVICES[deviceKey] || DEVICES.xl;
+  if (isPokemonData(data)) return buildPokemonPages(data, device);
+
   const pages = [{ name: "Controls", keys: buildControlKeys(device, data) }];
 
   const slots = cardSlotIndices(device);

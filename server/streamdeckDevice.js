@@ -38,7 +38,7 @@ const PROBE_UPLOAD_TIMEOUT_MS = 5000;
 const RENDER_CONCURRENCY = 4;
 const PARTIAL_KEY_THRESHOLD = 6;
 const HID_PACKET_BATCH = 4;
-const CARD_KEY_TYPES = new Set(["showCard", "battlefield"]);
+const CARD_KEY_TYPES = new Set(["showCard", "battlefield", "pokemonBoardSet"]);
 
 let nodeLib = null;
 let imagesMod = null;
@@ -311,6 +311,15 @@ async function handleKeyAction(keyDef, keyIndex) {
   const s = keyDef.settings || {};
   try {
     switch (keyDef.type) {
+      case "gotoPage": {
+        const index = pages.findIndex((page) => page.name === s.pageName);
+        if (index >= 0) {
+          currentPageIndex = index;
+          await drawCurrentPage();
+          setStatus({ currentPage: currentPageIndex });
+        }
+        return;
+      }
       case "navPrev":
         if (currentPageIndex > 0) {
           currentPageIndex -= 1;
@@ -358,6 +367,38 @@ async function handleKeyAction(keyDef, keyIndex) {
           await apiGet(`/hot/card/${s.player}/index/${s.index}`);
         }
         return;
+      case "pokemonBoardSet": {
+        if (!s.player || !s.cardId) return;
+        const data = getActiveGameData();
+        const game = data.match?.games?.[data.match?.currentGame ?? 0];
+        const side = game?.pokemon?.[s.player] || { active: null, bench: [] };
+        const bench = Array.isArray(side.bench) ? [...side.bench] : [];
+        while (bench.length < 5) bench.push(null);
+        let active = side.active || null;
+        if (s.slot === "active") {
+          active = s.cardId;
+        } else {
+          const benchIndex = Math.max(0, Math.min(4, Number(s.benchIndex) || 0));
+          bench[benchIndex] = s.cardId;
+        }
+        await apiPost("/match/pokemon-board", {
+          gameIndex: data.match?.currentGame ?? 0,
+          player: s.player,
+          active,
+          bench: bench.filter(Boolean),
+        });
+        const returnPageName = s.returnPageName || null;
+        await rebuildPages(false);
+        if (returnPageName) {
+          const index = pages.findIndex((page) => page.name === returnPageName);
+          if (index >= 0) {
+            currentPageIndex = index;
+            await drawCurrentPage();
+            setStatus({ currentPage: currentPageIndex });
+          }
+        }
+        return;
+      }
       default:
         console.warn("[streamdeck] Unknown key type:", keyDef.type);
     }

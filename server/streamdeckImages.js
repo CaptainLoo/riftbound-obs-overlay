@@ -21,6 +21,10 @@ export const ICON_COLORS = {
   win: [156, 136, 255],
   game: [79, 168, 204],
   show: [63, 185, 100],
+  pokemonSlot: [21, 116, 194],
+  pokemonActive: [126, 216, 255],
+  pokemonBench: [63, 185, 100],
+  pokemonPrize: [239, 31, 45],
   nav: [90, 90, 100],
 };
 
@@ -252,7 +256,7 @@ export async function renderCardKeyImage(cardId, cardsCache, label, size = 96, o
 export async function renderKeyImage(keyDef, cardsCache, size = 96) {
   const active = Boolean(keyDef.active);
   const highlightKind = highlightKindForKeyType(keyDef.type, active);
-  if (keyDef.type === "showCard" || keyDef.type === "battlefield") {
+  if (keyDef.type === "showCard" || keyDef.type === "battlefield" || keyDef.type === "pokemonBoardSet") {
     const cardId = keyDef.cardId || keyDef.settings?.cardId;
     if (cardId) {
       return renderCardKeyImage(cardId, cardsCache, keyDef.label, size, { active, highlightKind });
