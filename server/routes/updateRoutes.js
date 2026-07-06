@@ -4,6 +4,7 @@ import {
   downloadUpdate,
   getDownloadProgress,
   getLocalVersionInfo,
+  listAvailableUpdates,
   getUpdateLog,
   getUpdateStatus,
   preflightUpdate,
@@ -18,9 +19,17 @@ updateRoutes.get("/version", (_req, res) => {
   res.json(getLocalVersionInfo());
 });
 
-updateRoutes.get("/update/check", async (_req, res) => {
+updateRoutes.get("/update/releases", async (_req, res) => {
   try {
-    res.json(await checkForUpdate());
+    res.json(await listAvailableUpdates());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+updateRoutes.get("/update/check", async (req, res) => {
+  try {
+    res.json(await checkForUpdate({ version: req.query?.version }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -30,9 +39,9 @@ updateRoutes.get("/update/progress", (_req, res) => {
   res.json(getDownloadProgress() || { status: "idle" });
 });
 
-updateRoutes.post("/update/download", async (_req, res) => {
+updateRoutes.post("/update/download", async (req, res) => {
   try {
-    res.json(await downloadUpdate());
+    res.json(await downloadUpdate({ version: req.body?.version }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

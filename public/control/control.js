@@ -1332,6 +1332,7 @@ const updateDownloadBtn = document.getElementById("update-download");
 const updateApplyBtn = document.getElementById("update-apply");
 const updateDismissBtn = document.getElementById("update-dismiss");
 const updateCheckBtn = document.getElementById("update-check");
+const updateVersionSelect = document.getElementById("update-version-select");
 const updateLogBtn = document.getElementById("update-log");
 const updateProgressWrap = document.getElementById("update-progress-wrap");
 const updateProgressBar = document.getElementById("update-progress-bar");
@@ -1342,6 +1343,35 @@ const UPDATE_LOG_PATH = "%APPDATA%\\RiftboundOBS\\updates\\update.log";
 let updateState = null;
 let updateDismissedVersion = null;
 let updateDismissedFailureAt = null;
+let updateReleasesLoaded = false;
+
+function selectedUpdateVersion() {
+  return updateVersionSelect?.value || "latest";
+}
+
+function updateQueryString() {
+  const version = selectedUpdateVersion();
+  return version && version !== "latest" ? `?version=${encodeURIComponent(version)}` : "";
+}
+
+async function loadUpdateReleases() {
+  if (!updateVersionSelect || updateReleasesLoaded) return;
+  try {
+    const info = await api("/api/update/releases");
+    updateVersionSelect.innerHTML = `<option value="latest">Latest stable</option>`;
+    for (const release of info.releases || []) {
+      const opt = document.createElement("option");
+      opt.value = release.version;
+      opt.textContent = `${release.version}${release.prerelease ? " beta" : ""}`;
+      opt.title = release.name || release.tag || release.version;
+      updateVersionSelect.appendChild(opt);
+    }
+    updateVersionSelect.classList.toggle("hidden", !(info.releases || []).length);
+    updateReleasesLoaded = true;
+  } catch {
+    updateVersionSelect.classList.add("hidden");
+  }
+}
 
 function formatUpdateSize(state) {
   if (state.updateMode === "patch") {
@@ -1395,6 +1425,9 @@ function setUpdateUi(state) {
   }
   if (updateCheckBtn) {
     updateCheckBtn.classList.toggle("hidden", !state?.supported);
+  }
+  if (updateVersionSelect) {
+    updateVersionSelect.classList.toggle("hidden", !state?.supported || !updateReleasesLoaded);
   }
   if (!updateBanner) return;
 
@@ -1487,7 +1520,8 @@ function setUpdateUi(state) {
       updateDetail.textContent = state.updateBlockedReason;
       updateDownloadBtn.disabled = true;
     } else {
-      updateDetail.textContent = `You are on v${state.currentVersion}. Download size ${formatUpdateSize(state)}.`;
+      const selected = state.selectedVersion && state.selectedVersion !== "latest" ? `Selected ${state.selectedVersion}. ` : "";
+      updateDetail.textContent = `${selected}You are on v${state.currentVersion}. Download size ${formatUpdateSize(state)}.`;
       updateDownloadBtn.disabled = false;
     }
     updateApplyBtn.disabled = true;
@@ -1520,7 +1554,8 @@ async function pollApplyStatusWhileOnline() {
 
 async function checkUpdates() {
   try {
-    const state = await api("/api/update/check");
+    await loadUpdateReleases();
+    const state = await api(`/api/update/check${updateQueryString()}`);
     setUpdateUi(state);
     return state;
   } catch (err) {
@@ -1569,7 +1604,10 @@ updateDownloadBtn?.addEventListener("click", async () => {
   setUpdateProgress(0);
   const progressPoll = pollDownloadProgress();
   try {
-    await api("/api/update/download", { method: "POST" });
+    await api("/api/update/download", {
+      method: "POST",
+      body: { version: selectedUpdateVersion() },
+    });
     await progressPoll;
     toast("Update downloaded", "ok");
     await checkUpdates();
@@ -1678,6 +1716,11 @@ updateCheckBtn?.addEventListener("click", async () => {
   updateCheckBtn.disabled = true;
   await checkUpdates();
   updateCheckBtn.disabled = false;
+});
+
+updateVersionSelect?.addEventListener("change", async () => {
+  updateDismissedVersion = null;
+  await checkUpdates();
 });
 
 checkUpdates();

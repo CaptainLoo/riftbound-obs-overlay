@@ -589,6 +589,14 @@ select:focus {
   white-space: nowrap;
 }
 
+.update-version-select {
+  width: auto;
+  max-width: 220px;
+  min-width: 150px;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
 .update-banner {
   display: flex;
   align-items: flex-start;

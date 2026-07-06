@@ -99,16 +99,22 @@ function findAsset(release, matcher) {
   return (release.assets || []).find(matcher);
 }
 
-async function fetchLatestManifest() {
+function assertUpdateRepo() {
   const repo = getUpdateRepo();
   if (!repo || repo.includes("REPLACE")) {
     throw new Error(
       "Update repo not configured. Set package.json → riftbound.updateRepo to owner/repo."
     );
   }
+  return repo;
+}
 
-  const release = await fetchJson(`https://api.github.com/repos/${repo}/releases/latest`);
-  const tag = release.tag_name?.replace(/^v/, "") || release.name;
+function normalizeReleaseVersion(release) {
+  return release.tag_name?.replace(/^v/, "").replace(/^beta-/, "") || release.name;
+}
+
+async function releaseToManifest(release) {
+  const tag = normalizeReleaseVersion(release);
 
   let manifest = null;
   const manifestAsset = findAsset(release, (a) => a.name === "update-manifest.json");
@@ -169,7 +175,45 @@ async function fetchLatestManifest() {
 
   manifest.version = manifest.version || tag;
   manifest.channel = manifest.channel || "stable";
+  manifest.releaseTag = release.tag_name;
+  manifest.prerelease = Boolean(release.prerelease);
   return manifest;
+}
+
+async function fetchLatestManifest() {
+  const repo = assertUpdateRepo();
+  const release = await fetchJson(`https://api.github.com/repos/${repo}/releases/latest`);
+  return releaseToManifest(release);
+}
+
+async function fetchManifestForVersion(version) {
+  if (!version || version === "latest") return fetchLatestManifest();
+  const repo = assertUpdateRepo();
+  const releases = await fetchJson(`https://api.github.com/repos/${repo}/releases?per_page=100`);
+  const wanted = String(version).replace(/^v/, "");
+  const release = releases.find((r) => {
+    const normalized = normalizeReleaseVersion(r);
+    return normalized === wanted || r.tag_name === version || r.tag_name === `v${wanted}`;
+  });
+  if (!release) throw new Error(`Release ${version} not found.`);
+  return releaseToManifest(release);
+}
+
+export async function listAvailableUpdates() {
+  const repo = assertUpdateRepo();
+  const releases = await fetchJson(`https://api.github.com/repos/${repo}/releases?per_page=100`);
+  return {
+    currentVersion: getVersion(),
+    releases: releases
+      .filter((r) => !r.draft)
+      .map((release) => ({
+        tag: release.tag_name,
+        version: normalizeReleaseVersion(release),
+        name: release.name || release.tag_name,
+        prerelease: Boolean(release.prerelease),
+        publishedAt: release.published_at,
+      })),
+  };
 }
 
 function nodeMajorMinor(version) {
@@ -273,7 +317,7 @@ function getLastApplyFailure() {
   };
 }
 
-export async function checkForUpdate() {
+export async function checkForUpdate({ version } = {}) {
   if (!isUpdateSupported()) {
     return {
       supported: false,
@@ -286,7 +330,7 @@ export async function checkForUpdate() {
   const currentVersion = getVersion();
   let manifest;
   try {
-    manifest = await fetchLatestManifest();
+    manifest = await fetchManifestForVersion(version);
   } catch (err) {
     return {
       supported: true,
@@ -314,6 +358,9 @@ export async function checkForUpdate() {
     supported: true,
     currentVersion,
     latestVersion,
+    selectedVersion: version || "latest",
+    releaseTag: manifest.releaseTag || null,
+    prerelease: Boolean(manifest.prerelease),
     updateAvailable,
     updateMode,
     updateBlockedReason,
@@ -390,7 +437,7 @@ function existingPendingMatches(status) {
   }
 }
 
-export async function downloadUpdate() {
+export async function downloadUpdate({ version } = {}) {
   if (!isUpdateSupported()) {
     throw new Error("Updates not supported on this platform.");
   }
@@ -398,7 +445,7 @@ export async function downloadUpdate() {
   clearStaleLock();
   acquireLock("download");
   try {
-    const status = await checkForUpdate();
+    const status = await checkForUpdate({ version });
     if (status.error) throw new Error(status.error);
     if (!status.updateAvailable) {
       return { ok: true, message: "Already up to date.", ...status };
