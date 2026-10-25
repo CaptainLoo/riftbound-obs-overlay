@@ -1,7 +1,7 @@
 {
   "name": "riftbound-obs-overlay",
-  "version": "2.1.6",
-  "description": "Riftbound stream overlay for OBS (Browser Source) with web control panel.",
+  "version": "3.0.0-beta.1",
+  "description": "Riftbound stream overlay for OBS (Browser Source) with web control panel, Stream Deck control and in-app updates.",
   "type": "module",
   "main": "electron/main.cjs",
   "repository": {
@@ -28,9 +28,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@elgato-stream-deck/node": "^7.6.3",
     "@electron/rebuild": "^4.1.0",
-    "archiver": "^6.0.2",
+    "@elgato-stream-deck/node": "^7.6.3",
     "express": "^4.19.2",
     "lowdb": "^7.0.1",
     "sharp": "^0.35.3",
@@ -38,7 +37,8 @@
   },
   "devDependencies": {
     "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "knip": "^6.43.0"
   },
   "build": {
     "appId": "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",

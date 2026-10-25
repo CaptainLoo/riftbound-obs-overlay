@@ -75,6 +75,7 @@ export async function startServer(options = {}) {
     });
     server.listen(port, "127.0.0.1", () => resolve());
   });
+  logStartup(`listen OK (port ${port})`);
 
   console.log("Riftbound OBS Overlay");
   console.log(`  Overlay (Browser Source) : http://localhost:${port}/overlay`);

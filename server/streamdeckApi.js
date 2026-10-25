@@ -107,6 +107,7 @@ function spawnWorker() {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
       RIFTBOUND_ELECTRON: "1",
+      RIFTBOUND_SD_WORKER: "1",
       RIFTBOUND_INSTALL_ROOT: installRoot,
       RIFTBOUND_CONTENT_ROOT: contentRoot,
     },

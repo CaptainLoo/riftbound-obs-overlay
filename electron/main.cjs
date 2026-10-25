@@ -9,7 +9,8 @@ function startupLogPath() {
 }
 
 function logStartup(message, err) {
-  const line = `[${new Date().toISOString()}] ${message}${
+  const uptime = Math.round(process.uptime() * 1000);
+  const line = `[${new Date().toISOString()}] [main +${uptime}ms] ${message}${
     err ? ` — ${err && (err.stack || err.message || String(err))}` : ""
   }`;
   try {
@@ -218,6 +219,9 @@ function createWindow(port) {
       mainWindow.show();
       logStartup("Control window shown");
     }
+  });
+  mainWindow.webContents.once("did-finish-load", () => {
+    logStartup("Control page loaded");
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${port}/home`).catch((err) => {
