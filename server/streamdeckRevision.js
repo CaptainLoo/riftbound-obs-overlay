@@ -1,38 +1,25 @@
-import { collectStreamDeckCardIds } from "./streamdeckCardAssets.js";
-
 const DYNAMIC_KEY_TYPES = new Set(["gamePoint", "battlefield", "selectGame"]);
 
 function stableStringify(value) {
   return JSON.stringify(value);
 }
 
-/** Deck layout, player names, and cached card metadata used on Stream Deck pages. */
-export function fingerprintStructure(data, deviceKey = "xl") {
-  const cardIds = collectStreamDeckCardIds(data, deviceKey);
-  const cacheSlice = {};
-  for (const id of cardIds.sort()) {
-    const entry = data.cardsCache?.[id];
-    if (entry) {
-      cacheSlice[id] = {
-        name: entry.name,
-        thumbLocal: entry.thumbLocal,
-        imageLocal: entry.imageLocal,
-      };
-    }
-  }
+/** Deck layout, player names and card metadata used on Stream Deck pages. */
+export function fingerprintStructure(model) {
   return stableStringify({
-    players: (data.players || []).map((p) => ({
+    players: (model?.players || []).map((p) => ({
       id: p.id,
       pseudo: p.pseudo,
-      deck: p.deck,
+      cards: (p.cards || []).map((c) => [c.id, c.label]),
+      battlefields: (p.battlefields || []).map((b) => [b.id, b.name]),
     })),
-    cardsCache: cacheSlice,
+    cards: model?.cards || {},
   });
 }
 
 /** Match state that affects Controls page labels only. */
-export function fingerprintControls(data) {
-  const match = data.match || {};
+export function fingerprintControls(model) {
+  const match = model?.match || {};
   return stableStringify({
     currentGame: match.currentGame ?? 0,
     games: (match.games || []).map((g) => ({
@@ -45,22 +32,24 @@ export function fingerprintControls(data) {
 /**
  * @returns {"skip"|"partial"|"full"}
  */
-export function classifyStreamDeckRefresh(prev, data, deviceKey = "xl") {
+export function classifyStreamDeckRefresh(prev, model) {
   if (!prev?.structure) return "full";
+  if (prev.rev && model?.rev && prev.rev === model.rev) return "skip";
 
-  const structure = fingerprintStructure(data, deviceKey);
+  const structure = fingerprintStructure(model);
   if (structure !== prev.structure) return "full";
 
-  const controls = fingerprintControls(data);
+  const controls = fingerprintControls(model);
   if (controls !== prev.controls) return "partial";
 
   return "skip";
 }
 
-export function snapshotRevision(data, deviceKey = "xl") {
+export function snapshotRevision(model) {
   return {
-    structure: fingerprintStructure(data, deviceKey),
-    controls: fingerprintControls(data),
+    rev: model?.rev || null,
+    structure: fingerprintStructure(model),
+    controls: fingerprintControls(model),
   };
 }
 

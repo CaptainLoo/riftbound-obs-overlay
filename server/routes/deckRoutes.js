@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { previewDecklist, savePlayerDeck, searchCards } from "../services/deckService.js";
+import { repairMany } from "../services/cardCacheService.js";
 import { setPseudo } from "../services/playerService.js";
+import { commit } from "../services/stateService.js";
 
 export const deckRoutes = Router();
 
@@ -9,6 +11,17 @@ deckRoutes.get("/cards/search", async (req, res) => {
     res.json(await searchCards(req.query.q));
   } catch (err) {
     res.status(502).json({ error: err.message });
+  }
+});
+
+/** Re-download cards whose images are missing on disk (Stream Deck worker, maintenance). */
+deckRoutes.post("/cards/repair", async (req, res) => {
+  try {
+    const result = await repairMany(req.body?.ids);
+    if (result.repaired.length) commit(["players"]);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

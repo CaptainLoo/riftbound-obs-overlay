@@ -1,4 +1,7 @@
+import { runPool } from "./util/pool.js";
 import { collectPageCardIds } from "./streamdeckCardAssets.js";
+
+export { runPool };
 import { renderPagePanel } from "./streamdeckPanel.js";
 import {
   getCachedPanelPrepared,
@@ -12,18 +15,6 @@ import { fingerprintPageVisual } from "./streamdeckRevision.js";
 const CARD_KEY_TYPES = new Set(["showCard", "battlefield"]);
 const DEFAULT_CONCURRENCY = 4;
 
-/** Run async tasks with a fixed concurrency pool. */
-export async function runPool(tasks, concurrency = DEFAULT_CONCURRENCY) {
-  if (!tasks.length) return;
-  let next = 0;
-  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
-    while (next < tasks.length) {
-      const i = next++;
-      await tasks[i]();
-    }
-  });
-  await Promise.all(workers);
-}
 
 function isCardPage(page) {
   if (!page?.keys) return false;

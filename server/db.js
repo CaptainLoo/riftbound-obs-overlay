@@ -338,6 +338,14 @@ function migrateCardFiles() {
   }
   rmSync(join(CARDS_DIR, "pokemon"), { recursive: true, force: true });
   rmSync(join(DATA_DIR, "pokemon-set-index.json"), { force: true });
+  // Stream Deck scratch thumbs used to live next to the card images.
+  try {
+    for (const name of readdirSync(CARDS_DIR)) {
+      if (name.endsWith("-sd96.rgb")) rmSync(join(CARDS_DIR, name), { force: true });
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ---------------------------------------------------------------------------

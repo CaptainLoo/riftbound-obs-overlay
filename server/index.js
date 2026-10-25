@@ -6,9 +6,9 @@ import express from "express";
 import { PUBLIC_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./paths.js";
 import { logStartup } from "./startupLog.js";
 import { initDb } from "./db.js";
-import { initHub, closeHub } from "./hub.js";
+import { initHub, closeHub, broadcastStreamDeckStatus } from "./hub.js";
 import { router } from "./routes.js";
-import { startStreamDeckSafe, stopStreamDeckSafe } from "./streamdeckApi.js";
+import { onStreamDeckStatus, startStreamDeckSafe, stopStreamDeckSafe } from "./streamdeckApi.js";
 import { clearAppPid, registerShutdownForUpdate, writeAppPid } from "./update-shutdown.js";
 import { readApplyStatus, readLastUpdate } from "./update-utils.js";
 import { compareSemver, getVersion } from "./version.js";
@@ -53,6 +53,7 @@ export async function startServer(options = {}) {
 
   const server = createServer(app);
   initHub(server);
+  onStreamDeckStatus((status) => broadcastStreamDeckStatus(status));
 
   await new Promise((resolve, reject) => {
     server.once("error", (err) => {
@@ -75,9 +76,10 @@ export async function startServer(options = {}) {
   console.log(`  Control panel            : http://localhost:${port}/control`);
   if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
   /* Stream Deck HID runs in a separate worker — auto-starts shortly after boot */
+  const spawnDelay = Number(process.env.RIFTBOUND_SD_SPAWN_DELAY_MS) || 1000;
   setTimeout(() => {
     startStreamDeckSafe().catch((err) => logStartup("[streamdeck] auto-start failed", err));
-  }, 3000);
+  }, spawnDelay);
 
   if (openBrowser) {
     exec(`start http://localhost:${port}/control`);

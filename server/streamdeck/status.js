@@ -1,10 +1,20 @@
-import { platform } from "node:os";
-import { IS_ELECTRON } from "../paths.js";
+import { IS_ELECTRON, IS_RELEASE } from "../paths.js";
+
+/**
+ * Native Stream Deck control runs inside the desktop app and in `npm start`
+ * dev mode, on any OS (macOS and Windows are both supported by node-hid).
+ * Set RIFTBOUND_NO_STREAMDECK=1 to disable it.
+ */
+export function isStreamDeckSupported() {
+  if (process.env.RIFTBOUND_NO_STREAMDECK === "1") return false;
+  return IS_ELECTRON || !IS_RELEASE;
+}
 
 export function defaultStreamDeckStatus() {
   return {
-    supported: platform() === "win32" && IS_ELECTRON,
+    supported: isStreamDeckSupported(),
     connected: false,
+    worker: false,
     phase: "idle",
     model: null,
     productName: null,
@@ -40,7 +50,7 @@ export function defaultStreamDeckStatus() {
 export function formatStreamDeckError(err) {
   const msg = err?.message || String(err);
   if (/could not open|cannot open|access|busy|in use/i.test(msg)) {
-    return "Stream Deck busy — quit the Elgato Stream Deck app completely, then restart Riftbound OBS.";
+    return "Stream Deck busy — quit the Elgato Stream Deck app completely, then click Reconnect.";
   }
   return msg;
 }
@@ -75,4 +85,3 @@ export function resetStreamDeckStatusPatch() {
     panelUploadMs: null,
   };
 }
-

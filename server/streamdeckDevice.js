@@ -1,4 +1,4 @@
-import { db } from "./db.js";
+import { apiGet, apiPost } from "./streamdeck/client.js";
 import { buildPages, detectDeviceKey } from "./streamdeckLayout.js";
 import {
   collectPageCardIds,
@@ -29,8 +29,6 @@ import {
   resetStreamDeckStatusPatch,
 } from "./streamdeck/status.js";
 
-const DEFAULT_PORT = Number(process.env.PORT) || 7474;
-const API = `http://127.0.0.1:${DEFAULT_PORT}/api`;
 const KEY_RENDER_TIMEOUT_MS = 8000;
 const KEY_UPLOAD_TIMEOUT_MS = 20000;
 const PANEL_UPLOAD_TIMEOUT_MS = 30000;
@@ -71,6 +69,23 @@ let lastRevision = null;
 let imageDrawGeneration = 0;
 let imageDrawInFlight = false;
 
+const EMPTY_MODEL = {
+  rev: null,
+  players: [],
+  match: { format: "bo3", currentGame: 0, games: [] },
+  display: { cards: { p1: null, p2: null } },
+  cards: {},
+};
+/** Current app model pushed by the server (see streamdeck/model.js). Never read the DB here. */
+let model = EMPTY_MODEL;
+const cards = () => model.cards;
+
+export function setModel(next, { refresh = true } = {}) {
+  if (!next || typeof next !== "object") return;
+  model = { ...EMPTY_MODEL, ...next, cards: next.cards || {} };
+  if (refresh) refreshStreamDeckIfConnected();
+}
+
 function setStatus(patch) {
   status = { ...status, ...patch };
   statusListener?.(getStreamDeckStatus());
@@ -96,32 +111,6 @@ export async function preflightNativeModules() {
     });
     throw err;
   }
-}
-
-function apiUrl(path) {
-  return `${API}${path.startsWith("/") ? path : `/${path}`}`;
-}
-
-async function apiGet(path) {
-  const res = await fetch(apiUrl(path));
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-  return res.json().catch(() => ({}));
-}
-
-async function apiPost(path, body = {}) {
-  const res = await fetch(apiUrl(path), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-  return res.json().catch(() => ({}));
 }
 
 function sleep(ms) {
@@ -240,7 +229,7 @@ async function prefetchCardAssets(cardIds) {
   }
 
   setStatus({ cardPrefetch: { done: 0, total: cardIds.length } });
-  const result = await ensureCardAssets(cardIds, (progress) => {
+  const result = await ensureCardAssets(cardIds, cards(), (progress) => {
     setStatus({ cardPrefetch: progress });
   });
 
@@ -261,7 +250,7 @@ async function prefetchCardAssets(cardIds) {
 }
 
 async function prefetchForCurrentContext() {
-  const allIds = collectStreamDeckCardIds(db.data, deviceKey);
+  const allIds = collectStreamDeckCardIds(model, deviceKey);
   const page = pages[currentPageIndex];
   const pageIds = page ? collectPageCardIds(page) : [];
   const priorityIds = [...new Set([...pageIds, ...allIds])];
@@ -400,13 +389,13 @@ function scheduleAdjacentWarm() {
   setImmediate(async () => {
     try {
       const { renderKeyImage, getIconColorForKeyDef } = await loadImagesMod();
-      await warmAdjacentPages(pages, currentPageIndex, db.data.cardsCache, keySize, renderKeyImage);
+      await warmAdjacentPages(pages, currentPageIndex, cards(), keySize, renderKeyImage);
       if (typeof deck.fillPanelBuffer === "function") {
         await warmAdjacentPanelPages(
           deck,
           pages,
           currentPageIndex,
-          db.data.cardsCache,
+          cards(),
           renderKeyImage,
           getIconColorForKeyDef
         );
@@ -435,7 +424,7 @@ async function renderKeysBatch(indices, page, generation, { onProgress } = {}) {
 
         try {
           const rgb = await withTimeout(
-            renderKeyImage(keyDef, db.data.cardsCache, keySize),
+            renderKeyImage(keyDef, cards(), keySize),
             KEY_RENDER_TIMEOUT_MS,
             `Key ${idx} render`
           );
@@ -603,7 +592,7 @@ async function drawCurrentPageViaPanel(generation, { showProgress = true } = {})
 
   const pageIds = collectPageCardIds(page);
   if (pageIds.length) {
-    const { ready, total } = countReadyAssets(pageIds);
+    const { ready, total } = countReadyAssets(pageIds, cards());
     if (ready < total) {
       await prefetchCardAssets(pageIds);
     }
@@ -634,7 +623,7 @@ async function drawCurrentPageViaPanel(generation, { showProgress = true } = {})
     const rgbPanel = await renderPagePanel(
       deck,
       page,
-      db.data.cardsCache,
+      cards(),
       renderKeyImage,
       getIconColorForKeyDef,
       { concurrency: RENDER_CONCURRENCY }
@@ -713,7 +702,7 @@ async function drawCurrentPageImages(generation) {
 
   const pageIds = collectPageCardIds(page);
   if (pageIds.length) {
-    const { ready, total } = countReadyAssets(pageIds);
+    const { ready, total } = countReadyAssets(pageIds, cards());
     if (ready < total) {
       await prefetchCardAssets(pageIds);
     }
@@ -791,7 +780,7 @@ async function drawCurrentPage() {
 async function rebuildPages(resetPage = false) {
   if (!deck) return;
   deviceKey = detectDeviceKey(deck);
-  pages = buildPages(db.data, deviceKey);
+  pages = buildPages(model, deviceKey);
   if (resetPage || currentPageIndex >= pages.length) currentPageIndex = 0;
   setStatus({
     deviceKey,
@@ -809,7 +798,7 @@ export async function refreshStreamDeck(force = false) {
   try {
     deviceKey = detectDeviceKey(deck);
     const oldPages = pages;
-    const mode = force ? "full" : classifyStreamDeckRefresh(lastRevision, db.data, deviceKey);
+    const mode = force ? "full" : classifyStreamDeckRefresh(lastRevision, model, deviceKey);
 
     if (mode === "skip" && !force) {
       setStatus({ refreshMode: "skip" });
@@ -822,9 +811,9 @@ export async function refreshStreamDeck(force = false) {
       clearPanelHidCache();
     }
 
-    pages = buildPages(db.data, deviceKey);
+    pages = buildPages(model, deviceKey);
     if (currentPageIndex >= pages.length) currentPageIndex = 0;
-    lastRevision = snapshotRevision(db.data, deviceKey);
+    lastRevision = snapshotRevision(model, deviceKey);
 
     setStatus({
       deviceKey,
@@ -864,7 +853,7 @@ export function refreshStreamDeckIfConnected() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
     refreshStreamDeck(false).catch((err) => console.error("[streamdeck]", err));
-  }, 300);
+  }, 60);
 }
 
 export function getStreamDeckStatus() {
@@ -970,8 +959,8 @@ export async function startStreamDeck() {
 
     deviceKey = detectDeviceKey(deck);
     currentPageIndex = 0;
-    pages = buildPages(db.data, deviceKey);
-    lastRevision = snapshotRevision(db.data, deviceKey);
+    pages = buildPages(model, deviceKey);
+    lastRevision = snapshotRevision(model, deviceKey);
 
     setStatus({
       error: null,
@@ -1023,12 +1012,12 @@ export async function startStreamDeck() {
   }
 }
 
-export async function stopStreamDeck() {
+export async function stopStreamDeck({ quick = false } = {}) {
   clearTimeout(refreshTimer);
   imageDrawGeneration += 1;
   if (!deck) return;
   try {
-    if (process.env.RIFTBOUND_SD_QUICK_CLOSE === "1") {
+    if (quick) {
       await deck.close();
     } else {
       await deck.resetToLogo();

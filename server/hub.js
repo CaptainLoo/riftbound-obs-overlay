@@ -3,6 +3,7 @@ import { db, FORMATS } from "./db.js";
 import { buildOverlayPlayers } from "./deckCards.js";
 
 let wss = null;
+let lastStreamDeckStatus = null;
 
 function card(cardsCache, id) {
   if (!id) return null;
@@ -60,6 +61,9 @@ export function initHub(server) {
   wss = new WebSocketServer({ server, path: "/ws" });
   wss.on("connection", (socket) => {
     socket.send(JSON.stringify({ type: "state", state: buildState() }));
+    if (lastStreamDeckStatus) {
+      socket.send(JSON.stringify({ type: "streamdeck", status: lastStreamDeckStatus }));
+    }
   });
 }
 
@@ -79,6 +83,13 @@ function send(message) {
 export function broadcastState() {
   if (!wss) return;
   send(JSON.stringify({ type: "state", state: buildState() }));
+}
+
+/** Push the Stream Deck worker status to browsers (no polling needed). */
+export function broadcastStreamDeckStatus(status) {
+  lastStreamDeckStatus = status;
+  if (!wss) return;
+  send(JSON.stringify({ type: "streamdeck", status }));
 }
 
 export function buildPatch(...sections) {

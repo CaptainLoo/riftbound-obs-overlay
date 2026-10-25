@@ -75,7 +75,16 @@ export async function repairCardAsset(cardId) {
  * Ensure a card is present in the local cache: fetches metadata and downloads
  * the full image + a large thumbnail. Returns the cached entry.
  */
-export async function cacheCard(cardId) {
+const inFlight = new Map();
+
+export function cacheCard(cardId) {
+  if (inFlight.has(cardId)) return inFlight.get(cardId);
+  const p = cacheCardNow(cardId).finally(() => inFlight.delete(cardId));
+  inFlight.set(cardId, p);
+  return p;
+}
+
+async function cacheCardNow(cardId) {
   const existing = db.data.cardsCache[cardId];
   if (existing) {
     if (localAssetExists(existing.thumbLocal) || localAssetExists(existing.imageLocal)) {
@@ -105,11 +114,5 @@ export async function cacheCard(cardId) {
 
   db.data.cardsCache[id] = entry;
   markDirty();
-  try {
-    const { bakeStreamDeckThumb } = await import("./streamdeckImages.js");
-    await bakeStreamDeckThumb(id, db.data.cardsCache);
-  } catch (err) {
-    console.warn(`[cache] sd96 bake ${id}: ${err.message}`);
-  }
   return entry;
 }

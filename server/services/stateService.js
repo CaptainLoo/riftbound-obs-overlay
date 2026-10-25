@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { broadcastPatch, broadcastState } from "../hub.js";
 import { markDirty } from "../persist.js";
+import { pushStreamDeckModel } from "../streamdeckApi.js";
 
 const BROADCAST_DEBOUNCE_MS = 32;
 
@@ -32,6 +33,7 @@ export function scheduleBroadcast(sections = null) {
     pendingSections.clear();
     if (full || !list.length) broadcastState();
     else broadcastPatch(list);
+    pushStreamDeckModel();
   }, BROADCAST_DEBOUNCE_MS);
 }
 

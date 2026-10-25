@@ -82,7 +82,10 @@ export const DATA_DIR = resolveDataDir();
 /** Cached card images, served at `/cards/<file>`. */
 export const CARDS_DIR = join(DATA_DIR, "cards");
 export const DB_FILE = join(DATA_DIR, "db.json");
+/** Pre-baked 96×96 RGB thumbnails for Stream Deck keys (worker-owned scratch files). */
+export const SD96_DIR = join(DATA_DIR, "sd96");
 
 export function ensureDataDirs() {
   mkdirSync(CARDS_DIR, { recursive: true });
+  mkdirSync(SD96_DIR, { recursive: true });
 }
