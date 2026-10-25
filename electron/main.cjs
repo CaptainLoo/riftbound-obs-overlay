@@ -3,9 +3,19 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
+/** Same user-data folder as server/paths.js (Windows %APPDATA%, macOS Library/Application Support). */
+function userDataDir() {
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "RiftboundOBS");
+  }
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "RiftboundOBS");
+  }
+  return path.join(os.homedir(), ".config", "riftbound-obs");
+}
+
 function startupLogPath() {
-  const appData = process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
-  return path.join(appData, "RiftboundOBS", "startup.log");
+  return path.join(userDataDir(), "startup.log");
 }
 
 function logStartup(message, err) {
