@@ -43,7 +43,7 @@ function verifyInstalledVersion(expectedVersion) {
   };
 }
 
-export async function applyInstallerUpdate(pending) {
+async function applyInstallerUpdate(pending) {
   acquireLock("installer-apply");
   try {
     mkdirSync(updatesDir(), { recursive: true });

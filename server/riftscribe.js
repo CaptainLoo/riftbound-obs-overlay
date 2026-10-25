@@ -1,30 +1,47 @@
 import { writeFile, access } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, basename } from "node:path";
 import { db } from "./db.js";
 import { CARDS_DIR } from "./paths.js";
+import { markDirty } from "./persist.js";
+import { memoAsync } from "./util/memo.js";
 
 const API_BASE = "https://riftscribe.gg/api";
 
-async function fetchJson(url) {
+const RETRY_DELAY_MS = 500;
+
+async function fetchJson(url, attempt = 0) {
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) {
+    // One retry on rate limiting / transient upstream errors.
+    if (attempt === 0 && (res.status === 429 || res.status >= 500)) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      return fetchJson(url, attempt + 1);
+    }
     throw new Error(`RiftScribe request failed (${res.status}) for ${url}`);
   }
   return res.json();
 }
 
-/** Typeahead search by name. Returns lightweight candidates. */
+const searchMemo = memoAsync(
+  (q) => fetchJson(`${API_BASE}/cards/search?q=${encodeURIComponent(q)}`),
+  { ttlMs: 10 * 60 * 1000, max: 500, key: (q) => q }
+);
+const detailMemo = memoAsync(
+  (cardId) => fetchJson(`${API_BASE}/cards/${encodeURIComponent(cardId)}`),
+  { ttlMs: 60 * 60 * 1000, max: 1000, key: (id) => id }
+);
+
+/** Typeahead search by name (memoized 10 min). Returns lightweight candidates. */
 export async function searchByName(name) {
   const q = String(name || "").trim();
   if (q.length < 2) return [];
-  const url = `${API_BASE}/cards/search?q=${encodeURIComponent(q)}`;
-  return fetchJson(url);
+  return searchMemo(q.toLowerCase());
 }
 
-/** Full card detail from the API (not cached). */
+/** Full card detail from the API (memoized 1 h). */
 export async function fetchCardDetail(cardId) {
-  return fetchJson(`${API_BASE}/cards/${encodeURIComponent(cardId)}`);
+  return detailMemo(String(cardId));
 }
 
 function fileExists(path) {
@@ -45,34 +62,45 @@ async function downloadImage(url, cardId, suffix) {
     const buf = Buffer.from(await res.arrayBuffer());
     await writeFile(dest, buf);
   }
-  // Served by express static middleware mounted at /cards.
   return `/cards/${fileName}`;
 }
 
-/**
- * Ensure a card is present in the local cache: fetches metadata and downloads
- * the full image + a large thumbnail. Returns the cached entry.
- */
+/** Absolute path of a cached `/cards/<file>` URL, or null when the file is missing. */
+function localCardFile(localPath) {
+  if (!localPath) return null;
+  const abs = join(CARDS_DIR, basename(localPath));
+  return existsSync(abs) ? abs : null;
+}
+
 function localAssetExists(localPath) {
-  if (!localPath) return false;
-  const file = localPath.replace(/^\/cards\//, "");
-  return existsSync(join(CARDS_DIR, file));
+  return Boolean(localCardFile(localPath));
 }
 
 /** Re-download a card when cache metadata exists but files are missing on disk. */
 export async function repairCardAsset(cardId) {
   const entry = db.data.cardsCache[cardId];
   if (entry) {
-    const thumbOk = localAssetExists(entry.thumbLocal);
-    const imageOk = localAssetExists(entry.imageLocal);
-    if (thumbOk || imageOk) return entry;
+    if (localAssetExists(entry.thumbLocal) || localAssetExists(entry.imageLocal)) return entry;
     delete db.data.cardsCache[cardId];
-    await db.write();
+    markDirty();
   }
   return cacheCard(cardId);
 }
 
-export async function cacheCard(cardId) {
+/**
+ * Ensure a card is present in the local cache: fetches metadata and downloads
+ * the full image + a large thumbnail. Returns the cached entry.
+ */
+const inFlight = new Map();
+
+export function cacheCard(cardId) {
+  if (inFlight.has(cardId)) return inFlight.get(cardId);
+  const p = cacheCardNow(cardId).finally(() => inFlight.delete(cardId));
+  inFlight.set(cardId, p);
+  return p;
+}
+
+async function cacheCardNow(cardId) {
   const existing = db.data.cardsCache[cardId];
   if (existing) {
     if (localAssetExists(existing.thumbLocal) || localAssetExists(existing.imageLocal)) {
@@ -101,16 +129,6 @@ export async function cacheCard(cardId) {
   };
 
   db.data.cardsCache[id] = entry;
-  await db.write();
-  try {
-    const { bakeStreamDeckThumb } = await import("./streamdeckImages.js");
-    await bakeStreamDeckThumb(id, db.data.cardsCache);
-  } catch (err) {
-    console.warn(`[cache] sd96 bake ${id}: ${err.message}`);
-  }
+  markDirty();
   return entry;
-}
-
-export function getCachedCard(cardId) {
-  return db.data.cardsCache[cardId] || null;
 }

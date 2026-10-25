@@ -1,181 +1,115 @@
 /**
- * Stream Deck HID worker — runs in a separate process so native crashes cannot take down the app.
+ * Stream Deck HID worker. Runs in a separate process so native crashes cannot
+ * take down the app. It holds no database: the server pushes a model over IPC
+ * (see streamdeck/transport.js) and this process renders keys and forwards key
+ * presses to the HTTP API.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import WebSocket from "ws";
-import { DATA_DIR } from "./paths.js";
-import { initDb } from "./db.js";
 import { logStartup } from "./startupLog.js";
+import { createTransport, isIpcAvailable } from "./streamdeck/transport.js";
 
-const STATUS_FILE = join(DATA_DIR, "streamdeck-status.json");
-const QUICK_CLOSE_FLAG = join(DATA_DIR, "streamdeck-quick-close.flag");
-const COMMAND_FILE = join(DATA_DIR, "streamdeck-command.json");
-const DEFAULT_PORT = Number(process.env.PORT) || 7474;
-
-function writeStatus(status) {
-  try {
-    mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(STATUS_FILE, `${JSON.stringify({ ...status, worker: true }, null, 2)}\n`, "utf8");
-  } catch (err) {
-    logStartup("[streamdeck-worker] status write failed", err);
-  }
-}
-
-function writeFatalStatus(error) {
-  writeStatus({
-    supported: true,
-    connected: false,
-    phase: "error",
-    worker: true,
-    error: error?.message || String(error),
-  });
-}
+const FIRST_MODEL_TIMEOUT_MS = 5000;
 
 async function main() {
   logStartup("[streamdeck-worker] starting");
-  writeStatus({
-    supported: true,
-    connected: false,
-    phase: "loading",
-    worker: true,
-    error: null,
-  });
+
+  if (!isIpcAvailable(process)) {
+    logStartup("[streamdeck-worker] no IPC channel — the worker must be spawned by the server");
+    process.exit(1);
+  }
+  const transport = createTransport(process);
+
+  const fatal = (err) => {
+    transport.sendStatus({
+      supported: true,
+      connected: false,
+      phase: "error",
+      worker: true,
+      error: err?.message || String(err),
+    });
+    transport.flushStatus();
+    setTimeout(() => process.exit(1), 50);
+  };
 
   process.on("uncaughtException", (err) => {
     logStartup("[streamdeck-worker] uncaughtException", err);
-    writeFatalStatus(err);
-    process.exit(1);
+    fatal(err);
   });
-
   process.on("unhandledRejection", (reason) => {
     logStartup("[streamdeck-worker] unhandledRejection", reason);
-    writeFatalStatus(reason instanceof Error ? reason : new Error(String(reason)));
-    process.exit(1);
+    fatal(reason instanceof Error ? reason : new Error(String(reason)));
   });
 
-  let startStreamDeck;
-  let stopStreamDeck;
-  let refreshStreamDeck;
-  let getStreamDeckStatus;
-  let setStreamDeckStatusListener;
+  transport.sendStatus({ supported: true, connected: false, phase: "loading", worker: true, error: null });
 
+  let device;
   try {
-    ({
-      startStreamDeck,
-      stopStreamDeck,
-      refreshStreamDeck,
-      getStreamDeckStatus,
-      setStreamDeckStatusListener,
-    } = await import("./streamdeckDevice.js"));
+    device = await import("./streamdeckDevice.js");
+    logStartup("[streamdeck-worker] modules loaded");
   } catch (err) {
     logStartup("[streamdeck-worker] module load failed", err);
-    writeFatalStatus(
-      new Error(
-        `Stream Deck module failed to load: ${err.message || err}. Try reinstalling Riftbound OBS.`
-      )
-    );
-    process.exit(1);
+    fatal(new Error(`Stream Deck module failed to load: ${err.message || err}. Try reinstalling Riftbound OBS.`));
+    return;
   }
 
-  setStreamDeckStatusListener((s) => writeStatus(s));
+  device.setStreamDeckStatusListener((s) => transport.sendStatus(s));
 
-  const publishStatus = () => writeStatus(getStreamDeckStatus());
-
-  const shutdown = async (code = 0) => {
+  let shuttingDown = false;
+  const shutdown = async (quick = false) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     try {
-      if (existsSync(QUICK_CLOSE_FLAG)) {
-        process.env.RIFTBOUND_SD_QUICK_CLOSE = "1";
-        rmSync(QUICK_CLOSE_FLAG, { force: true });
-      }
-      await stopStreamDeck();
+      await device.stopStreamDeck({ quick });
     } catch {
       /* ignore */
     }
-    process.exit(code);
+    transport.flushStatus();
+    process.exit(0);
   };
+  process.on("SIGTERM", () => shutdown(false));
+  process.on("SIGINT", () => shutdown(false));
+  process.on("disconnect", () => shutdown(true));
 
-  process.on("SIGTERM", () => shutdown(0));
-  process.on("SIGINT", () => shutdown(0));
+  // Wait for the first model before opening the device so the first draw is complete.
+  const firstModel = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), FIRST_MODEL_TIMEOUT_MS);
+    transport.onModel(({ model }) => {
+      clearTimeout(timer);
+      resolve(model);
+    });
+  });
+  transport.onModel(({ model }) => {
+    device.setModel(model);
+  });
+  transport.onCommand((msg) => {
+    if (msg.cmd === "refresh-images") {
+      device.refreshStreamDeck(Boolean(msg.force)).catch((err) => logStartup("[streamdeck-worker] refresh-images failed", err));
+    } else if (msg.cmd === "shutdown") {
+      shutdown(Boolean(msg.quick));
+    }
+  });
 
-  try {
-    logStartup("[streamdeck-worker] initDb…");
-    writeStatus({ ...getStreamDeckStatus(), phase: "loading", error: null });
-    await initDb();
-    logStartup("[streamdeck-worker] initDb OK");
-  } catch (err) {
-    logStartup("[streamdeck-worker] initDb failed", err);
-    writeFatalStatus(new Error(`Database init failed: ${err.message || err}`));
-    process.exit(1);
+  transport.sendReady();
+  const model = await firstModel;
+  if (model) {
+    device.setModel(model, { refresh: false });
+    logStartup("[streamdeck-worker] model received");
+  } else {
+    logStartup("[streamdeck-worker] no model received yet — starting with empty pages");
   }
 
   try {
-    await startStreamDeck();
-    publishStatus();
-    logStartup(`[streamdeck-worker] device init done — ${JSON.stringify(getStreamDeckStatus())}`);
+    await device.startStreamDeck();
+    logStartup(`[streamdeck-worker] device init done — ${JSON.stringify(device.getStreamDeckStatus())}`);
   } catch (err) {
     logStartup("[streamdeck-worker] init failed", err);
-    writeFatalStatus(err);
-    process.exit(1);
+    fatal(err);
+    return;
   }
-
-  const wsUrl = `ws://127.0.0.1:${DEFAULT_PORT}`;
-  let ws = null;
-  let refreshTimer = null;
-
-  const scheduleRefresh = () => {
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => {
-      refreshStreamDeck(false)
-        .then(publishStatus)
-        .catch((err) => logStartup("[streamdeck-worker] refresh failed", err));
-    }, 300);
-  };
-
-  const connectWs = () => {
-    ws = new WebSocket(wsUrl);
-    ws.on("open", () => logStartup("[streamdeck-worker] ws connected"));
-    ws.on("message", (raw) => {
-      try {
-        const msg = JSON.parse(String(raw));
-        if (msg.type === "state") scheduleRefresh();
-      } catch {
-        /* ignore */
-      }
-    });
-    ws.on("close", () => {
-      setTimeout(connectWs, 2000);
-    });
-    ws.on("error", () => {
-      /* reconnect via close */
-    });
-  };
-
-  connectWs();
-  setInterval(publishStatus, 3000);
-
-  const pollCommands = () => {
-    if (!existsSync(COMMAND_FILE)) return;
-    try {
-      const cmd = JSON.parse(readFileSync(COMMAND_FILE, "utf8"));
-      rmSync(COMMAND_FILE, { force: true });
-      if (cmd.cmd === "refresh-images") {
-        refreshStreamDeck(Boolean(cmd.force))
-          .then(publishStatus)
-          .catch((err) => logStartup("[streamdeck-worker] refresh-images failed", err));
-      }
-    } catch (err) {
-      logStartup("[streamdeck-worker] command poll failed", err);
-      rmSync(COMMAND_FILE, { force: true });
-    }
-  };
-  setInterval(pollCommands, 500);
 
   logStartup("[streamdeck-worker] running");
 }
 
 main().catch((err) => {
   logStartup("[streamdeck-worker] fatal", err);
-  writeFatalStatus(err);
   process.exit(1);
 });

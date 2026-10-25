@@ -1,6 +1,5 @@
 node_modules/
-data/db.json
-data/cards/
+data/
 dist/
 *.log
 .DS_Store

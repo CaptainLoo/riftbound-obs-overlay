@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { CARDS_DIR } from "./paths.js";
+import { CARDS_DIR, SD96_DIR } from "./paths.js";
 
 const SD96_SIZE = 96;
 
@@ -80,13 +80,12 @@ function assertRgbBuffer(buffer, size, label) {
 
 async function localCardPath(thumbLocal) {
   if (!thumbLocal) return null;
-  const file = basename(thumbLocal);
-  const abs = join(CARDS_DIR, file);
+  const abs = join(CARDS_DIR, basename(thumbLocal));
   return existsSync(abs) ? abs : null;
 }
 
 function sd96Path(cardId) {
-  return join(CARDS_DIR, `${cardId}-sd96.rgb`);
+  return join(SD96_DIR, `${cardId}.rgb`);
 }
 
 function readSd96Art(cardId) {
@@ -111,6 +110,7 @@ export async function bakeStreamDeckThumb(cardId, cardsCache) {
     .raw({ channels: 3 })
     .toBuffer();
   const rgb = assertRgbBuffer(raw, SD96_SIZE, `bake sd96 ${cardId}`);
+  mkdirSync(SD96_DIR, { recursive: true });
   writeFileSync(sd96Path(cardId), rgb);
   cardArtCache.set(`${SD96_SIZE}:${cardId}`, rgb);
   return true;

@@ -1,4 +1,7 @@
-import { searchByName, fetchCardDetail } from "./riftscribe.js";
+import * as riftscribe from "./riftscribe.js";
+import { runPool } from "./util/pool.js";
+
+const RESOLVE_CONCURRENCY = 4;
 
 const CATEGORY_HEADERS = [
   { category: "legend", re: /^(legend|l[ée]gende)s?\s*:?\s*$/i },
@@ -11,21 +14,17 @@ const CATEGORY_HEADERS = [
 
 const LINE_RE = /^(\d+)\s*x?\s+(.+?)\s*$/i;
 
+function emptyParsed() {
+  return { legend: [], champions: [], maindeck: [], battlefields: [], runes: [], sideboard: [] };
+}
+
 /**
  * Parse a sectioned text decklist into categorized entries.
  * Returns { legend, champions, maindeck, battlefields, runes, sideboard } where
  * each value is an array of { quantity, name }.
  */
 export function parseDecklist(text) {
-  const result = {
-    legend: [],
-    champions: [],
-    maindeck: [],
-    battlefields: [],
-    runes: [],
-    sideboard: [],
-  };
-
+  const result = emptyParsed();
   let current = "maindeck";
 
   for (const rawLine of String(text || "").split(/\r?\n/)) {
@@ -69,7 +68,7 @@ function pickDefault(candidates, name) {
   return (base || pool[0]).card_id;
 }
 
-async function resolveOne(name, category) {
+async function resolveOne(name, category, { searchByName }) {
   let candidates = await searchByName(name).catch(() => []);
   const lower = name.toLowerCase();
   let hasExact = candidates.some((c) => c.name.toLowerCase() === lower);
@@ -95,19 +94,29 @@ async function resolveOne(name, category) {
 }
 
 /**
- * Resolve every parsed entry against the RiftScribe search API.
- * Returns the same category structure, each entry enriched with
- * { quantity, name, candidates, chosen, ambiguous }.
+ * Resolve every parsed entry against the RiftScribe search API, with bounded
+ * concurrency. Returns the same category structure, each entry enriched with
+ * { quantity, name, candidates, chosen, ambiguous }, in the original order.
+ * `deps` lets tests inject a fake API.
  */
-export async function resolveDecklist(parsed) {
-  const out = {};
+export async function resolveDecklist(parsed, deps = riftscribe) {
+  const flat = [];
   for (const [category, entries] of Object.entries(parsed)) {
-    out[category] = [];
-    for (const entry of entries) {
-      const r = await resolveOne(entry.name, category);
-      out[category].push({ quantity: entry.quantity, name: entry.name, ...r });
-    }
+    for (const entry of entries) flat.push({ category, entry });
   }
+  const resolved = await runPool(
+    flat.map(({ category, entry }) => async () => ({
+      quantity: entry.quantity,
+      name: entry.name,
+      ...(await resolveOne(entry.name, category, deps)),
+    })),
+    RESOLVE_CONCURRENCY
+  );
+
+  const out = emptyParsed();
+  flat.forEach(({ category }, i) => {
+    (out[category] ||= []).push(resolved[i]);
+  });
   return out;
 }
 
@@ -118,7 +127,7 @@ export async function resolveDecklist(parsed) {
  * Cards are categorized by their API type; champion/sideboard cannot be
  * distinguished from a flat list and are left for the operator to adjust.
  */
-export async function resolveTTS(text) {
+export async function resolveTTS(text, deps = riftscribe) {
   const counts = new Map();
   for (const token of String(text || "").split(/\s+/)) {
     const m = token.trim().match(/^([a-z]+)-(\d+[a-z]?)/i);
@@ -127,17 +136,19 @@ export async function resolveTTS(text) {
     counts.set(id, (counts.get(id) || 0) + 1);
   }
 
-  const out = { legend: [], champions: [], maindeck: [], battlefields: [], runes: [], sideboard: [] };
-  for (const [id, quantity] of counts) {
-    let detail = null;
-    try {
-      detail = await fetchCardDetail(id);
-    } catch {
-      detail = null;
-    }
+  const ids = [...counts.keys()];
+  const details = await runPool(
+    ids.map((id) => () => deps.fetchCardDetail(id).catch(() => null)),
+    RESOLVE_CONCURRENCY
+  );
+
+  const out = emptyParsed();
+  ids.forEach((id, i) => {
+    const quantity = counts.get(id);
+    const detail = details[i];
     if (!detail) {
       out.maindeck.push({ quantity, name: id, candidates: [], chosen: null, ambiguous: true });
-      continue;
+      return;
     }
     const cand = {
       card_id: detail.id,
@@ -151,6 +162,6 @@ export async function resolveTTS(text) {
     else if (detail.type === "Battlefield") out.battlefields.push(entry);
     else if (detail.type === "Rune") out.runes.push(entry);
     else out.maindeck.push(entry);
-  }
+  });
   return out;
 }

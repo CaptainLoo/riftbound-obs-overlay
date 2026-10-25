@@ -1,4 +1,7 @@
-import { playerBattlefields, playerDisplayCards } from "./deckCards.js";
+/**
+ * Builds Stream Deck pages from the model pushed by the server
+ * (see streamdeck/model.js). Pure: no I/O, no database.
+ */
 
 export const DEVICES = {
   standard: { model: "20GBD9901", cols: 5, rows: 3, label: "Stream Deck (15 keys)" },
@@ -7,7 +10,7 @@ export const DEVICES = {
 };
 
 /** Linear key index (row-major), matches @elgato-stream-deck/core grid. */
-export function keyIndex(device, col, row) {
+function keyIndex(device, col, row) {
   return row * device.cols + col;
 }
 
@@ -48,151 +51,100 @@ function addNavigation(keys, device) {
   keys.set(next, { type: "navNext", label: "Next ▶" });
 }
 
-function enrichGamePointLabel(def, data) {
+function currentGame(model) {
+  return model.match?.games?.[model.match?.currentGame ?? 0] || {};
+}
+
+function enrichGamePointLabel(def, model) {
   const player = def.settings?.player;
   const delta = def.settings?.delta ?? 1;
-  const pts = data.match?.games?.[data.match?.currentGame ?? 0]?.score?.[player] ?? 0;
+  const pts = currentGame(model).score?.[player] ?? 0;
   const prefix = player === "p1" ? "P1" : "P2";
   return `${prefix} ${delta > 0 ? "+" : "−"} (${pts})`;
 }
 
-function enrichBattlefieldDef(def, data) {
+function gamePointKey(player, delta, model) {
+  return {
+    type: "gamePoint",
+    label: enrichGamePointLabel({ settings: { player, delta } }, model),
+    icon: "win",
+    settings: { player, delta },
+  };
+}
+
+function enrichBattlefieldDef(def, model) {
   const player = def.settings?.player;
   const cardId = def.settings?.cardId;
-  const current = data.match?.games?.[data.match?.currentGame ?? 0]?.battlefield?.[player];
-  const active = current === cardId;
+  const active = currentGame(model).battlefield?.[player] === cardId;
   def.active = active;
   const base = String(def.label || "").replace(/^✓\s*/, "");
   def.label = active ? `✓ ${base}` : base;
   return def;
 }
 
-function enrichSelectGameDef(def, data) {
+function battlefieldKey(player, bf, model, labelPrefix = "") {
+  return enrichBattlefieldDef(
+    {
+      type: "battlefield",
+      label: `${labelPrefix}${shortName(bf.name)}`,
+      icon: "game",
+      settings: { player, cardId: bf.id },
+      cardId: bf.id,
+    },
+    model
+  );
+}
+
+function enrichSelectGameDef(def, model) {
   const idx = Number(def.settings?.index) || 0;
-  const current = data.match?.currentGame ?? 0;
-  const active = idx === current;
+  const active = idx === (model.match?.currentGame ?? 0);
   def.active = active;
   const base = String(def.label || "").replace(/^[▶●]\s*/, "");
   def.label = active ? `▶ ${base}` : base;
   return def;
 }
 
-function buildControlKeys(device, data) {
+function selectGameKey(index, label, model) {
+  return enrichSelectGameDef({ type: "selectGame", label, icon: "game", settings: { index } }, model);
+}
+
+function buildControlKeys(device, model) {
   const keys = new Map();
-  const p1 = data.players?.[0];
-  const p2 = data.players?.[1];
-  const p1Bfs = p1 ? playerBattlefields(p1, data.cardsCache) : [];
-  const p2Bfs = p2 ? playerBattlefields(p2, data.cardsCache) : [];
+  const [p1, p2] = model.players || [];
+  const p1Bfs = p1?.battlefields || [];
+  const p2Bfs = p2?.battlefields || [];
 
   if (device.cols >= 8 && device.rows >= 4) {
     putKey(keys, device, 0, 0, { type: "hideAll", label: "Hide all", icon: "hide" });
     putKey(keys, device, 1, 0, { type: "matchup", label: "Matchup", icon: "matchup" });
     putKey(keys, device, 2, 0, { type: "resetMatch", label: "Reset", icon: "reset" });
-    putKey(keys, device, 3, 0, enrichSelectGameDef({ type: "selectGame", label: "Game 1", icon: "game", settings: { index: 0 } }, data));
-    putKey(keys, device, 4, 0, enrichSelectGameDef({ type: "selectGame", label: "Game 2", icon: "game", settings: { index: 1 } }, data));
-    putKey(keys, device, 5, 0, enrichSelectGameDef({ type: "selectGame", label: "Game 3", icon: "game", settings: { index: 2 } }, data));
+    putKey(keys, device, 3, 0, selectGameKey(0, "Game 1", model));
+    putKey(keys, device, 4, 0, selectGameKey(1, "Game 2", model));
+    putKey(keys, device, 5, 0, selectGameKey(2, "Game 3", model));
     putKey(keys, device, 6, 0, { type: "winGame", label: "P1 Win", icon: "win", settings: { player: "p1" } });
     putKey(keys, device, 7, 0, { type: "winGame", label: "P2 Win", icon: "win", settings: { player: "p2" } });
     putKey(keys, device, 0, 1, { type: "hidePlayer", label: "Hide P1", icon: "hide", settings: { player: "p1" } });
     putKey(keys, device, 1, 1, { type: "hidePlayer", label: "Hide P2", icon: "hide", settings: { player: "p2" } });
-    putKey(keys, device, 2, 1, {
-      type: "gamePoint",
-      label: enrichGamePointLabel({ settings: { player: "p1", delta: 1 } }, data),
-      icon: "win",
-      settings: { player: "p1", delta: 1 },
-    });
-    putKey(keys, device, 3, 1, {
-      type: "gamePoint",
-      label: enrichGamePointLabel({ settings: { player: "p1", delta: -1 } }, data),
-      icon: "win",
-      settings: { player: "p1", delta: -1 },
-    });
-    putKey(keys, device, 4, 1, {
-      type: "gamePoint",
-      label: enrichGamePointLabel({ settings: { player: "p2", delta: 1 } }, data),
-      icon: "win",
-      settings: { player: "p2", delta: 1 },
-    });
-    putKey(keys, device, 5, 1, {
-      type: "gamePoint",
-      label: enrichGamePointLabel({ settings: { player: "p2", delta: -1 } }, data),
-      icon: "win",
-      settings: { player: "p2", delta: -1 },
-    });
+    putKey(keys, device, 2, 1, gamePointKey("p1", 1, model));
+    putKey(keys, device, 3, 1, gamePointKey("p1", -1, model));
+    putKey(keys, device, 4, 1, gamePointKey("p2", 1, model));
+    putKey(keys, device, 5, 1, gamePointKey("p2", -1, model));
 
-    p1Bfs.forEach((bf, i) => {
-      if (i >= 6) return;
-      const def = {
-        type: "battlefield",
-        label: `P1 · ${shortName(bf.name)}`,
-        icon: "game",
-        settings: { player: "p1", cardId: bf.id },
-        cardId: bf.id,
-      };
-      enrichBattlefieldDef(def, data);
-      putKey(keys, device, i, 2, def);
-    });
-
-    p2Bfs.forEach((bf, i) => {
-      if (i >= 5) return;
-      const def = {
-        type: "battlefield",
-        label: `P2 · ${shortName(bf.name)}`,
-        icon: "game",
-        settings: { player: "p2", cardId: bf.id },
-        cardId: bf.id,
-      };
-      enrichBattlefieldDef(def, data);
-      putKey(keys, device, 1 + i, 3, def);
-    });
+    p1Bfs.slice(0, 6).forEach((bf, i) => putKey(keys, device, i, 2, battlefieldKey("p1", bf, model, "P1 · ")));
+    p2Bfs.slice(0, 5).forEach((bf, i) => putKey(keys, device, 1 + i, 3, battlefieldKey("p2", bf, model, "P2 · ")));
   } else if (device.cols >= 5 && device.rows >= 3) {
     putKey(keys, device, 0, 0, { type: "hideAll", label: "Hide", icon: "hide" });
     putKey(keys, device, 1, 0, { type: "matchup", label: "Matchup", icon: "matchup" });
-    putKey(keys, device, 2, 0, enrichSelectGameDef({ type: "selectGame", label: "G1", icon: "game", settings: { index: 0 } }, data));
-    putKey(keys, device, 3, 0, enrichSelectGameDef({ type: "selectGame", label: "G2", icon: "game", settings: { index: 1 } }, data));
-    putKey(keys, device, 4, 0, enrichSelectGameDef({ type: "selectGame", label: "G3", icon: "game", settings: { index: 2 } }, data));
+    putKey(keys, device, 2, 0, selectGameKey(0, "G1", model));
+    putKey(keys, device, 3, 0, selectGameKey(1, "G2", model));
+    putKey(keys, device, 4, 0, selectGameKey(2, "G3", model));
     putKey(keys, device, 0, 1, { type: "resetMatch", label: "Reset", icon: "reset" });
     putKey(keys, device, 1, 1, { type: "winGame", label: "P1 Win", icon: "win", settings: { player: "p1" } });
-    putKey(keys, device, 2, 1, {
-      type: "gamePoint",
-      label: enrichGamePointLabel({ settings: { player: "p1", delta: 1 } }, data),
-      icon: "win",
-      settings: { player: "p1", delta: 1 },
-    });
-    putKey(keys, device, 3, 1, {
-      type: "gamePoint",
-      label: enrichGamePointLabel({ settings: { player: "p2", delta: 1 } }, data),
-      icon: "win",
-      settings: { player: "p2", delta: 1 },
-    });
-    putKey(keys, device, 4, 1, {
-      type: "gamePoint",
-      label: enrichGamePointLabel({ settings: { player: "p2", delta: -1 } }, data),
-      icon: "win",
-      settings: { player: "p2", delta: -1 },
-    });
-    p1Bfs.slice(0, 2).forEach((bf, i) => {
-      const def = {
-        type: "battlefield",
-        label: shortName(bf.name),
-        icon: "game",
-        settings: { player: "p1", cardId: bf.id },
-        cardId: bf.id,
-      };
-      enrichBattlefieldDef(def, data);
-      putKey(keys, device, 1 + i, 2, def);
-    });
-    p2Bfs.slice(0, 2).forEach((bf, i) => {
-      const def = {
-        type: "battlefield",
-        label: shortName(bf.name),
-        icon: "game",
-        settings: { player: "p2", cardId: bf.id },
-        cardId: bf.id,
-      };
-      enrichBattlefieldDef(def, data);
-      putKey(keys, device, 3 + i, 2, def);
-    });
+    putKey(keys, device, 2, 1, gamePointKey("p1", 1, model));
+    putKey(keys, device, 3, 1, gamePointKey("p2", 1, model));
+    putKey(keys, device, 4, 1, gamePointKey("p2", -1, model));
+    p1Bfs.slice(0, 2).forEach((bf, i) => putKey(keys, device, 1 + i, 2, battlefieldKey("p1", bf, model)));
+    p2Bfs.slice(0, 2).forEach((bf, i) => putKey(keys, device, 3 + i, 2, battlefieldKey("p2", bf, model)));
   } else {
     putKey(keys, device, 0, 0, { type: "hideAll", label: "Hide", icon: "hide" });
     putKey(keys, device, 1, 0, { type: "resetMatch", label: "Reset", icon: "reset" });
@@ -205,20 +157,20 @@ function buildControlKeys(device, data) {
 }
 
 /**
- * Build all Stream Deck pages from current app data.
+ * Build all Stream Deck pages from the current model.
  * @returns {{ name: string, keys: Map<number, object> }[]}
  */
-export function buildPages(data, deviceKey = "xl") {
+export function buildPages(model, deviceKey = "xl") {
   const device = DEVICES[deviceKey] || DEVICES.xl;
-  const pages = [{ name: "Controls", keys: buildControlKeys(device, data) }];
+  const pages = [{ name: "Controls", keys: buildControlKeys(device, model || {}) }];
 
   const slots = cardSlotIndices(device);
-  for (const player of data.players || []) {
-    const info = playerDisplayCards(player, data.cardsCache);
-    if (!info.cards.length) continue;
+  for (const player of model?.players || []) {
+    const cardsList = player.cards || [];
+    if (!cardsList.length) continue;
 
-    for (let offset = 0; offset < info.cards.length; offset += slots.length) {
-      const chunk = info.cards.slice(offset, offset + slots.length);
+    for (let offset = 0; offset < cardsList.length; offset += slots.length) {
+      const chunk = cardsList.slice(offset, offset + slots.length);
       const keys = new Map();
       chunk.forEach((card, i) => {
         keys.set(slots[i], {
@@ -230,9 +182,9 @@ export function buildPages(data, deviceKey = "xl") {
       });
       addNavigation(keys, device);
       const pageNum = Math.floor(offset / slots.length) + 1;
-      const suffix = chunk.length < info.cards.length ? ` (${pageNum})` : "";
+      const suffix = chunk.length < cardsList.length ? ` (${pageNum})` : "";
       pages.push({
-        name: `${info.pseudo || player.id} cards${suffix}`,
+        name: `${player.pseudo || player.id} cards${suffix}`,
         keys,
       });
     }

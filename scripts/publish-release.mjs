@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ROOT,
+  bumpBetaVersion,
   bumpVersion,
   getManifestNodeVersion,
   getUpdateRepo,
@@ -17,6 +18,7 @@ import {
 const args = process.argv.slice(2);
 const noBump = args.includes("--no-bump");
 const forceFull = args.includes("--force-full");
+const isBeta = args.includes("--beta");
 const bumpPart = args.find((a) => ["major", "minor", "patch"].includes(a)) || "patch";
 
 const NATIVE_PACKAGES = [
@@ -77,8 +79,8 @@ function detectNativeReleaseChanges() {
 }
 
 if (!noBump) {
-  const next = bumpVersion(bumpPart);
-  console.log(`Version bumped → ${next}\n`);
+  const next = isBeta ? bumpBetaVersion() : bumpVersion(bumpPart);
+  console.log(`Version bumped → ${next}${isBeta ? " (beta)" : ""}\n`);
 }
 
 const version = getVersion();
@@ -137,7 +139,7 @@ const notes = notesArg ? notesArg.slice("--notes=".length) : `Release v${version
 
 const updateManifest = {
   version,
-  channel: "stable",
+  channel: isBeta ? "beta" : "stable",
   releasedAt: new Date().toISOString(),
   notes,
   nodeVersion: getManifestNodeVersion(),
@@ -183,8 +185,9 @@ try {
     stdio: "inherit",
   });
 } catch {
+  const prereleaseFlag = isBeta ? " --prerelease" : "";
   execSync(
-    `gh release create ${tag} ${assets.join(" ")} --repo ${repo} --title "Riftbound OBS v${version}" --notes "${notes.replace(/"/g, '\\"')}"`,
+    `gh release create ${tag} ${assets.join(" ")} --repo ${repo} --title "Riftbound OBS v${version}" --notes "${notes.replace(/"/g, '\\"')}"${prereleaseFlag}`,
     { stdio: "inherit" }
   );
 }

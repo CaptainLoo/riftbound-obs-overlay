@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /** True when running inside a pkg binary. */
-export const IS_PKG = Boolean(process.pkg);
+const IS_PKG = Boolean(process.pkg);
 /** True when launched via the portable Windows `Start Riftbound.bat`. */
 export const IS_PORTABLE = process.env.RIFTBOUND_PORTABLE === "1";
 /** True when launched via the Inno Setup installer shortcut. */
@@ -68,12 +68,24 @@ export function getContentRoot() {
   return DEV_ROOT;
 }
 
-function resolvePublicDir(root) {
-  return join(root, "public");
+function resolveDataDir() {
+  if (process.env.RIFTBOUND_DATA_DIR) {
+    return process.env.RIFTBOUND_DATA_DIR.replace(/[\\/]+$/, "");
+  }
+  return IS_RELEASE ? userDataDir() : join(DEV_ROOT, "data");
 }
 
 export const ROOT_DIR = getContentRoot();
-export const PUBLIC_DIR = resolvePublicDir(ROOT_DIR);
-export const DATA_DIR = IS_RELEASE ? userDataDir() : join(DEV_ROOT, "data");
+export const PUBLIC_DIR = join(ROOT_DIR, "public");
+/** User data (db.json, cached card images, update files). `RIFTBOUND_DATA_DIR` overrides it (tests). */
+export const DATA_DIR = resolveDataDir();
+/** Cached card images, served at `/cards/<file>`. */
 export const CARDS_DIR = join(DATA_DIR, "cards");
 export const DB_FILE = join(DATA_DIR, "db.json");
+/** Pre-baked 96×96 RGB thumbnails for Stream Deck keys (worker-owned scratch files). */
+export const SD96_DIR = join(DATA_DIR, "sd96");
+
+export function ensureDataDirs() {
+  mkdirSync(CARDS_DIR, { recursive: true });
+  mkdirSync(SD96_DIR, { recursive: true });
+}

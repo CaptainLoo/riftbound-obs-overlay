@@ -1,7 +1,23 @@
 // Tiny reconnecting WebSocket client shared by the overlay and control panel.
-export function connectState(onState) {
+export function mergeStatePatch(state, patch) {
+  if (!state) return patch ? { ...patch } : state;
+  if (!patch || typeof patch !== "object") return state;
+  return { ...state, ...patch };
+}
+
+/**
+ * connectState(onState, { onPatch?, onMessage? })
+ *   onState(state, { type: "state" | "patch", sections })  — app state frames
+ *   onPatch(state, info)                                    — optional override for patch frames
+ *   onMessage(msg)                                          — any other frame (e.g. { type: "streamdeck" })
+ */
+export function connectState(onState, options = {}) {
   let socket = null;
   let retry = null;
+  let state = null;
+
+  const onPatch = options.onPatch || null;
+  const onMessage = options.onMessage || null;
 
   function open() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -10,7 +26,17 @@ export function connectState(onState) {
     socket.addEventListener("message", (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === "state") onState(msg.state);
+        if (msg.type === "state") {
+          state = msg.state;
+          onState(state, { type: "state", sections: Object.keys(state || {}) });
+        } else if (msg.type === "patch") {
+          state = mergeStatePatch(state, msg.patch);
+          const info = { type: "patch", sections: msg.sections || Object.keys(msg.patch || {}) };
+          if (onPatch) onPatch(state, info);
+          else onState(state, info);
+        } else if (onMessage) {
+          onMessage(msg);
+        }
       } catch {
         /* ignore malformed frames */
       }

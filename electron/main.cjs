@@ -3,13 +3,24 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
+/** Same user-data folder as server/paths.js (Windows %APPDATA%, macOS Library/Application Support). */
+function userDataDir() {
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "RiftboundOBS");
+  }
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "RiftboundOBS");
+  }
+  return path.join(os.homedir(), ".config", "riftbound-obs");
+}
+
 function startupLogPath() {
-  const appData = process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
-  return path.join(appData, "RiftboundOBS", "startup.log");
+  return path.join(userDataDir(), "startup.log");
 }
 
 function logStartup(message, err) {
-  const line = `[${new Date().toISOString()}] ${message}${
+  const uptime = Math.round(process.uptime() * 1000);
+  const line = `[${new Date().toISOString()}] [main +${uptime}ms] ${message}${
     err ? ` — ${err && (err.stack || err.message || String(err))}` : ""
   }`;
   try {
@@ -23,8 +34,33 @@ function logStartup(message, err) {
 
 logStartup("Electron main starting");
 
-// Avoid GPU-related startup crashes on some Windows setups.
-app.disableHardwareAcceleration();
+/**
+ * GPU policy: hardware acceleration stays on (the layout editor hosts a live
+ * overlay iframe with masks and transforms). If the GPU process dies during the
+ * first seconds, write an opt-out flag and relaunch once in software mode.
+ */
+const GPU_OPT_OUT_FLAG = path.join(path.dirname(startupLogPath()), "disable-gpu");
+const GPU_WATCH_MS = 30000;
+if (fs.existsSync(GPU_OPT_OUT_FLAG) || process.env.RIFTBOUND_DISABLE_GPU === "1") {
+  app.disableHardwareAcceleration();
+  logStartup("Hardware acceleration disabled (opt-out flag)");
+}
+app.on("child-process-gone", (_event, details) => {
+  if (details?.type !== "GPU") return;
+  logStartup(`[main] GPU process gone: ${details.reason}`);
+  const early = process.uptime() * 1000 < GPU_WATCH_MS;
+  if (!early || fs.existsSync(GPU_OPT_OUT_FLAG)) return;
+  if (["clean-exit", "killed"].includes(details.reason)) return;
+  try {
+    fs.writeFileSync(GPU_OPT_OUT_FLAG, `${new Date().toISOString()} ${details.reason}\n`, "utf8");
+  } catch {
+    /* ignore */
+  }
+  logStartup("Relaunching with hardware acceleration disabled");
+  // The opt-out flag written above is what stops a relaunch loop.
+  app.relaunch();
+  app.exit(0);
+});
 
 process.env.RIFTBOUND_ELECTRON = "1";
 if (!app.isPackaged) {
@@ -126,7 +162,7 @@ function showMainWindow() {
     mainWindow.focus();
     return;
   }
-  if ((closeServer || attachedToExistingServer) && !isQuitting) {
+  if (!isQuitting) {
     createWindow(PORT);
   }
 }
@@ -189,6 +225,15 @@ function createTray() {
   tray.on("double-click", () => showMainWindow());
 }
 
+let serverReady = false;
+
+function loadControl(port) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.loadURL(`http://127.0.0.1:${port}/control`).catch((err) => {
+    showStartupError("Control panel failed to load", err?.message || String(err));
+  });
+}
+
 function createWindow(port) {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -203,8 +248,9 @@ function createWindow(port) {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
+    backgroundColor: "#0e1117",
   });
 
   Menu.setApplicationMenu(buildMenu());
@@ -219,10 +265,16 @@ function createWindow(port) {
       logStartup("Control window shown");
     }
   });
-
-  mainWindow.loadURL(`http://127.0.0.1:${port}/control`).catch((err) => {
-    showStartupError("Control panel failed to load", err?.message || String(err));
+  mainWindow.webContents.on("did-finish-load", () => {
+    const url = mainWindow?.webContents.getURL() || "";
+    logStartup(url.startsWith("file:") ? "Loading page shown" : "Control page loaded");
   });
+
+  if (serverReady) {
+    loadControl(port);
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "loading.html")).catch(() => {});
+  }
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -241,6 +293,9 @@ function createWindow(port) {
 }
 
 async function boot() {
+  // Show the window immediately; the renderer spawns while the server boots.
+  createWindow(PORT);
+
   logStartup("Loading server…");
   const { startServer, registerShutdownForUpdate } = await loadStartServer();
   logStartup("Starting server…");
@@ -257,6 +312,8 @@ async function boot() {
       throw err;
     }
   }
+  serverReady = true;
+  loadControl(PORT);
 
   registerShutdownForUpdate(async () => {
     isQuitting = true;
@@ -269,7 +326,6 @@ async function boot() {
     destroyTray();
   });
 
-  createWindow(PORT);
   setTimeout(() => {
     try {
       createTray();

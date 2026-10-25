@@ -1,4 +1,6 @@
-import { collectPageCardIds } from "./streamdeckCardAssets.js";
+import { runPool } from "./util/pool.js";
+
+export { runPool };
 import { renderPagePanel } from "./streamdeckPanel.js";
 import {
   getCachedPanelPrepared,
@@ -12,18 +14,6 @@ import { fingerprintPageVisual } from "./streamdeckRevision.js";
 const CARD_KEY_TYPES = new Set(["showCard", "battlefield"]);
 const DEFAULT_CONCURRENCY = 4;
 
-/** Run async tasks with a fixed concurrency pool. */
-export async function runPool(tasks, concurrency = DEFAULT_CONCURRENCY) {
-  if (!tasks.length) return;
-  let next = 0;
-  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
-    while (next < tasks.length) {
-      const i = next++;
-      await tasks[i]();
-    }
-  });
-  await Promise.all(workers);
-}
 
 function isCardPage(page) {
   if (!page?.keys) return false;
@@ -36,20 +26,13 @@ function isCardPage(page) {
 /**
  * Pre-render card key images (art + label composite) into memory cache.
  */
-export async function warmPageCardKeys(page, cardsCache, keySize, renderKeyImage, concurrency = DEFAULT_CONCURRENCY) {
+async function warmPageCardKeys(page, cardsCache, keySize, renderKeyImage, concurrency = DEFAULT_CONCURRENCY) {
   if (!page?.keys) return;
   const tasks = [];
   for (const keyDef of page.keys.values()) {
     if (!CARD_KEY_TYPES.has(keyDef.type)) continue;
     tasks.push(() => renderKeyImage(keyDef, cardsCache, keySize));
   }
-  await runPool(tasks, concurrency);
-}
-
-/** Warm card art for ids on a page (lighter — used when only art cache needed). */
-export async function warmPageCardArt(page, cardsCache, keySize, renderCardArtOnly, concurrency = DEFAULT_CONCURRENCY) {
-  const ids = collectPageCardIds(page);
-  const tasks = ids.map((id) => () => renderCardArtOnly(id, cardsCache, keySize));
   await runPool(tasks, concurrency);
 }
 

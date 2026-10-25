@@ -7,7 +7,7 @@ import { updatesDir } from "./update-utils.js";
 
 let shutdownForUpdateFn = null;
 
-export function appPidPath() {
+function appPidPath() {
   return join(updatesDir(), "app.pid");
 }
 
@@ -54,7 +54,7 @@ export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function isProcessAlive(pid) {
+function isProcessAlive(pid) {
   if (!pid || pid <= 0) return false;
   try {
     process.kill(pid, 0);

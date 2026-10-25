@@ -1,16 +1,18 @@
 import { createServer } from "node:http";
 import { exec } from "node:child_process";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import express from "express";
-import { PUBLIC_DIR, CARDS_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./paths.js";
+import { PUBLIC_DIR, DATA_DIR, IS_ELECTRON, IS_RELEASE } from "./paths.js";
 import { logStartup } from "./startupLog.js";
 import { initDb } from "./db.js";
-import { initHub, closeHub } from "./hub.js";
+import { initHub, closeHub, broadcastStreamDeckStatus } from "./hub.js";
 import { router } from "./routes.js";
-import { startStreamDeckSafe, stopStreamDeckSafe } from "./streamdeckApi.js";
+import { onStreamDeckStatus, startStreamDeckSafe, stopStreamDeckSafe } from "./streamdeckApi.js";
 import { clearAppPid, registerShutdownForUpdate, writeAppPid } from "./update-shutdown.js";
 import { readApplyStatus, readLastUpdate } from "./update-utils.js";
 import { compareSemver, getVersion } from "./version.js";
+import { flush } from "./persist.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 
@@ -29,8 +31,6 @@ export async function startServer(options = {}) {
     throw err;
   }
 
-  verifyPostUpdateBoot();
-
   const app = express();
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -42,15 +42,26 @@ export async function startServer(options = {}) {
   app.use(express.json({ limit: "1mb" }));
 
   app.use("/api", router);
-  app.use("/cards", express.static(CARDS_DIR, { maxAge: "1h" }));
+  // Card files are named by card id and never rewritten in place: cache them hard.
+  app.use(
+    "/cards",
+    express.static(join(DATA_DIR, "cards"), {
+      maxAge: "365d",
+      immutable: true,
+      etag: false,
+      lastModified: false,
+      index: false,
+    })
+  );
   app.use("/control", express.static(`${PUBLIC_DIR}/control`));
   app.use("/overlay", express.static(`${PUBLIC_DIR}/overlay`));
   app.use("/shared", express.static(`${PUBLIC_DIR}/shared`));
   app.use("/preview", express.static(`${PUBLIC_DIR}/preview`));
-  app.get("/", (_req, res) => res.redirect("/control"));
+  app.get(["/", "/home"], (_req, res) => res.redirect("/control"));
 
   const server = createServer(app);
   initHub(server);
+  onStreamDeckStatus((status) => broadcastStreamDeckStatus(status));
 
   await new Promise((resolve, reject) => {
     server.once("error", (err) => {
@@ -66,15 +77,23 @@ export async function startServer(options = {}) {
     });
     server.listen(port, "127.0.0.1", () => resolve());
   });
+  logStartup(`listen OK (port ${port})`);
+
+  // Everything below is off the critical path: the UI can already load.
+  setImmediate(() => {
+    verifyPostUpdateBoot();
+    writeAppPid();
+  });
 
   console.log("Riftbound OBS Overlay");
   console.log(`  Overlay (Browser Source) : http://localhost:${port}/overlay`);
   console.log(`  Control panel            : http://localhost:${port}/control`);
   if (IS_RELEASE) console.log(`  Data folder              : ${DATA_DIR}`);
   /* Stream Deck HID runs in a separate worker — auto-starts shortly after boot */
+  const spawnDelay = Number(process.env.RIFTBOUND_SD_SPAWN_DELAY_MS) || 1000;
   setTimeout(() => {
     startStreamDeckSafe().catch((err) => logStartup("[streamdeck] auto-start failed", err));
-  }, 3000);
+  }, spawnDelay);
 
   if (openBrowser) {
     exec(`start http://localhost:${port}/control`);
@@ -82,6 +101,7 @@ export async function startServer(options = {}) {
 
   const close = async () => {
     await stopStreamDeckSafe({ quickClose: true });
+    await flush();
     clearAppPid();
     closeHub();
     if (typeof server.closeAllConnections === "function") {
@@ -92,7 +112,6 @@ export async function startServer(options = {}) {
     });
   };
 
-  writeAppPid();
   registerShutdownForUpdate(async () => {
     await close();
   });
@@ -121,8 +140,21 @@ const isDirectRun =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectRun) {
-  startServer().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  startServer()
+    .then(({ close }) => {
+      let closing = false;
+      const onSignal = () => {
+        if (closing) return;
+        closing = true;
+        close()
+          .catch((err) => console.error(err))
+          .finally(() => process.exit(0));
+      };
+      process.on("SIGINT", onSignal);
+      process.on("SIGTERM", onSignal);
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }

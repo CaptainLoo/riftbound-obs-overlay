@@ -1,7 +1,7 @@
 {
   "name": "riftbound-obs-overlay",
-  "version": "2.1.5",
-  "description": "Riftbound stream overlay for OBS (Browser Source) with web control panel.",
+  "version": "3.0.0-beta.1",
+  "description": "Riftbound stream overlay for OBS (Browser Source) with web control panel, Stream Deck control and in-app updates.",
   "type": "module",
   "main": "electron/main.cjs",
   "repository": {
@@ -15,28 +15,30 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "dev:electron": "electron .",
+    "test": "node --test tests/*.test.mjs",
     "build:electron": "node scripts/build-electron.mjs",
     "build:win": "node scripts/build-win.mjs",
     "build:patch": "node scripts/build-patch.mjs",
     "build:installer": "node scripts/build-installer.mjs",
     "publish": "node scripts/publish-release.mjs",
+    "publish:beta": "node scripts/publish-release.mjs --beta",
     "setup:github": "node scripts/setup-github.mjs"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@elgato-stream-deck/node": "^7.6.3",
-    "@electron/rebuild": "^4.1.0",
-    "archiver": "^6.0.2",
+    "@electron/rebuild": "^4.2.1",
+    "@elgato-stream-deck/node": "^7.8.0",
     "express": "^4.19.2",
     "lowdb": "^7.0.1",
-    "sharp": "^0.35.3",
-    "ws": "^8.18.0"
+    "sharp": "^0.35.5",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "electron": "^44.9.3",
+    "electron-builder": "^26.18.0",
+    "knip": "^6.43.0"
   },
   "build": {
     "appId": "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",

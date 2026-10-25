@@ -3,161 +3,182 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Riftbound — Control Panel</title>
+    <meta name="theme-color" content="#0a0d13" />
+    <title>Riftbound OBS — Control Panel</title>
     <link rel="stylesheet" href="control.css" />
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="topbar">
-      <h1>Riftbound <span>Control</span></h1>
-      <nav class="tabs">
-        <button class="tab active" data-tab="setup">Players &amp; Decks</button>
-        <button class="tab" data-tab="match">Match</button>
-        <button class="tab" data-tab="streamdeck">Stream Deck</button>
-        <button class="tab" data-tab="layout">Layout</button>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <h1>Riftbound OBS <span>Control</span></h1>
+        <span class="app-version" id="app-version"></span>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button class="tab active" role="tab" aria-selected="true" data-tab="setup">Decks</button>
+        <button class="tab" role="tab" aria-selected="false" tabindex="-1" data-tab="match">Match</button>
+        <button class="tab" role="tab" aria-selected="false" tabindex="-1" data-tab="layout">Layout</button>
+        <button class="tab" role="tab" aria-selected="false" tabindex="-1" data-tab="streamdeck">Stream Deck</button>
       </nav>
-      <span class="app-version" id="app-version"></span>
-      <button type="button" class="btn ghost small hidden" id="update-check">Check updates</button>
-      <a class="overlay-link" href="/overlay" target="_blank" rel="noopener">Open overlay</a>
+      <div class="topbar-tools">
+        <select class="update-version-select compact hidden" id="update-version-select" title="Update version" aria-label="Update version">
+          <option value="latest">Latest stable</option>
+        </select>
+        <button type="button" class="btn ghost hidden" id="update-check">Check updates</button>
+        <a class="btn ghost overlay-link" href="/overlay" target="_blank" rel="noopener">Open overlay ↗</a>
+      </div>
     </header>
 
     <div id="update-banner" class="update-banner hidden" role="status">
       <div class="update-banner-text">
         <strong id="update-banner-title">Update available</strong>
         <span id="update-banner-detail" class="hint"></span>
-        <div id="update-progress-wrap" class="update-progress-wrap hidden">
-          <div id="update-progress-bar" class="update-progress-bar"></div>
+        <div id="update-progress-wrap" class="progress hidden" aria-hidden="true">
+          <div id="update-progress-bar" class="progress-bar"></div>
         </div>
         <pre id="update-banner-notes" class="update-notes hidden"></pre>
       </div>
       <div class="update-banner-actions">
-        <button type="button" class="btn small" id="update-download">Download</button>
-        <button type="button" class="btn small" id="update-apply" disabled>Install &amp; restart</button>
-        <button type="button" class="btn ghost small hidden" id="update-log">View log</button>
-        <button type="button" class="btn ghost small" id="update-dismiss">Dismiss</button>
+        <button type="button" class="btn primary" id="update-download">Download</button>
+        <button type="button" class="btn" id="update-apply" disabled>Install &amp; restart</button>
+        <button type="button" class="btn ghost hidden" id="update-log">View log</button>
+        <button type="button" class="btn ghost" id="update-dismiss">Dismiss</button>
       </div>
     </div>
 
-    <main>
-      <!-- ============ SETUP ============ -->
-      <section id="tab-setup" class="panel active">
+    <main id="main" tabindex="-1">
+      <!-- ============ DECKS ============ -->
+      <section id="tab-setup" class="panel active" role="tabpanel">
         <div class="players-grid" id="players-grid"></div>
       </section>
 
       <!-- ============ MATCH ============ -->
-      <section id="tab-match" class="panel">
-        <div class="match-top">
-        <div class="card-block">
-          <div class="row" style="justify-content: space-between; align-items: center">
-            <h2>Score &amp; Game</h2>
+      <section id="tab-match" class="panel" role="tabpanel">
+        <section class="card-block score-block">
+          <div class="block-head">
+            <div class="tally" aria-live="polite">
+              <span class="tally-name" id="tally-p1"></span>
+              <strong class="tally-score" id="tally-score">0 – 0</strong>
+              <span class="tally-name" id="tally-p2"></span>
+              <span class="chip chip-muted" id="tally-fmt"></span>
+            </div>
             <div class="row">
-              <span class="inline-lbl">Format</span>
-              <select id="match-format" style="width: auto">
+              <label class="inline" for="match-format">Format</label>
+              <select id="match-format" class="compact" data-action="match-format">
                 <option value="bo1">Bo1</option>
                 <option value="bo3">Bo3</option>
                 <option value="bo5">Bo5</option>
               </select>
-              <button class="btn danger small" id="reset-match">Reset match</button>
+              <button type="button" class="btn ghost danger" data-action="reset-match">Reset match</button>
             </div>
           </div>
-          <div class="match-tally" id="match-tally"></div>
-          <div class="score-row" id="score-row"></div>
-          <div class="game-row">
-            <span>Current game:</span>
-            <div class="game-buttons" id="game-buttons"></div>
-            <span class="winner-note" id="winner-note"></span>
+          <p class="winner-note hidden" id="winner-note" role="status"></p>
+
+          <div class="score-head">
+            <span class="eyebrow">Points this game</span>
+            <span class="chip" id="score-game-label">Game 1</span>
           </div>
-          <p class="hint" style="margin-top: 12px">
-            Shortcuts (when not typing): ← / → previous/next game · A = P1 wins game ·
-            P = P2 wins game · M = matchup · H / Esc = hide
+          <div class="score-row" id="score-row"></div>
+
+          <div class="game-row">
+            <span class="eyebrow">Current game</span>
+            <div class="seg-group" id="game-buttons" role="group" aria-label="Current game"></div>
+          </div>
+          <p class="hint shortcuts">
+            <kbd>←</kbd><kbd>→</kbd> game · <kbd>A</kbd> P1 wins · <kbd>P</kbd> P2 wins · <kbd>M</kbd> matchup · <kbd>H</kbd>/<kbd>Esc</kbd> hide
           </p>
-        </div>
-        </div>
-        <div class="selection-grid" id="selection-grid"></div>
-        <div class="card-block">
-          <h2>Display on screen</h2>
-          <div class="display-anim-row">
-            <span class="inline-lbl">Card animation</span>
-            <select id="card-animation" style="width: auto">
-              <option value="none">None (instant)</option>
-              <option value="fade">Fade in</option>
-              <option value="slide">Slide in (from side)</option>
-              <option value="pop">Pop (bounce)</option>
-              <option value="flip">Flip reveal</option>
-              <option value="glow">Arcane glow</option>
-              <option value="impact">Impact slam</option>
-            </select>
-            <span class="hint">Plays when a card is shown or when you change the style.</span>
+        </section>
+
+        <section class="card-block display-block">
+          <div class="block-head">
+            <h2>Display on screen</h2>
+            <div class="row">
+              <label class="inline" for="card-animation">Reveal</label>
+              <select id="card-animation" class="compact" data-action="card-animation">
+                <option value="none">None (instant)</option>
+                <option value="fade">Fade in</option>
+                <option value="slide">Slide in</option>
+                <option value="pop">Pop (bounce)</option>
+                <option value="flip">Flip reveal</option>
+                <option value="glow">Arcane glow</option>
+                <option value="impact">Impact slam</option>
+              </select>
+            </div>
           </div>
           <div class="display-grid" id="display-grid"></div>
-          <div class="row">
-            <button class="btn" id="show-matchup">Show matchup</button>
-            <button class="btn danger" id="hide-card">Hide all cards</button>
+          <div class="row display-actions">
+            <button type="button" class="btn primary" id="show-matchup" data-action="show-matchup">Show matchup</button>
+            <button type="button" class="btn ghost danger" data-action="hide-all">Hide all cards</button>
           </div>
+        </section>
+
+        <div class="selection-grid" id="selection-grid"></div>
+      </section>
+
+      <!-- ============ LAYOUT ============ -->
+      <section id="tab-layout" class="panel" role="tabpanel">
+        <div class="layout-wrap">
+          <div class="layout-stage-wrap">
+            <div class="block-head layout-toolbar">
+              <p class="hint">Drag blocks over the live overlay. Resize from the corner handle. Changes apply in OBS instantly.</p>
+              <div class="row">
+                <button type="button" class="btn ghost" data-action="reset-layout">Reset</button>
+                <button type="button" class="btn primary" data-action="save-layout">Save layout</button>
+              </div>
+            </div>
+            <div id="layout-stage" class="layout-stage"></div>
+          </div>
+          <aside class="layout-props card-block">
+            <h2>Properties</h2>
+            <div id="layout-props-body"></div>
+            <details class="css-details">
+              <summary>Generated CSS <button type="button" class="btn ghost tiny" data-action="copy-css">Copy</button></summary>
+              <pre id="layout-css-out" class="layout-css-out"></pre>
+            </details>
+          </aside>
         </div>
       </section>
 
       <!-- ============ STREAM DECK ============ -->
-      <section id="tab-streamdeck" class="panel">
-        <div class="card-block sd-setup">
-          <h2>Stream Deck</h2>
-          <p class="hint sd-intro">
-            Riftbound OBS controls your Stream Deck directly — no Elgato app or profile import.
-            Plug in your device, launch <strong>Riftbound OBS</strong> on Windows, and keys sync
-            automatically from your imported decks.
-          </p>
-
-          <div class="sd-status-row">
-            <span class="sd-status-badge" id="sd-hid-status">Checking…</span>
-            <button type="button" class="btn" id="sd-refresh-images">Refresh images</button>
-            <button type="button" class="btn" id="sd-reconnect">Reconnect</button>
-          </div>
-
-          <p class="hint" id="sd-hid-detail"></p>
-          <p class="hint sd-warn" id="sd-hid-hint"></p>
-          <p class="hint" id="sd-deck-status"></p>
-
-          <h3>What's included</h3>
-          <ul class="sd-list hint">
-            <li>Page 1 — Controls, reset match, game points (P1/P2 +/−), battlefields, game switch</li>
-            <li>◀ Prev / Next ▶ navigation on every page</li>
-            <li>One page per player — every deck card as a button (with card image)</li>
-            <li>Extra pages if the deck has more cards than your device grid</li>
-          </ul>
-
-          <p class="hint sd-warn">
-            <strong>Important:</strong> quit the Elgato Stream Deck app completely (tray icon → Quit)
-            before launching Riftbound OBS. Only one program can use the device at a time.
-          </p>
-        </div>
-      </section>
-
-      <!-- ============ LAYOUT ============ -->
-      <section id="tab-layout" class="panel">
-        <div class="layout-toolbar">
-          <button class="btn" id="save-layout">Save layout</button>
-          <button class="btn ghost" id="reset-layout">Reset layout</button>
-          <span class="hint">Card frames keep real aspect ratios (744×1039 / 1039×744). Overlay + CSS update live.</span>
-        </div>
-        <div class="layout-wrap">
-          <div class="layout-stage-wrap">
-            <p class="hint">
-              Drag blocks over the live overlay preview. Positions apply instantly in OBS too.
-            </p>
-            <div id="layout-stage" class="layout-stage"></div>
-          </div>
-          <aside class="layout-props">
-            <h2>Properties</h2>
-            <div id="layout-props-body">
-              <p class="hint">Select a block to edit it. The overlay preview updates live as you drag.</p>
+      <section id="tab-streamdeck" class="panel" role="tabpanel">
+        <section class="card-block sd-card">
+          <div class="block-head">
+            <h2>Stream Deck</h2>
+            <div class="row">
+              <button type="button" class="btn ghost" id="sd-refresh-images" data-action="sd-refresh-images">Refresh images</button>
+              <button type="button" class="btn primary" id="sd-reconnect" data-action="sd-reconnect">Reconnect</button>
             </div>
-            <h2 class="layout-css-title">Generated CSS</h2>
-            <pre id="layout-css-out" class="layout-css-out"></pre>
-          </aside>
-        </div>
+          </div>
+          <div class="sd-status">
+            <span class="status-badge tone-warn" id="sd-hid-status">Checking…</span>
+            <p class="sd-detail" id="sd-hid-detail"></p>
+            <div class="progress-block hidden" id="sd-progress">
+              <span class="hint" id="sd-progress-label"></span>
+              <div class="progress"><div class="progress-bar" id="sd-progress-bar"></div></div>
+            </div>
+            <p class="hint warn hidden" id="sd-hid-hint"></p>
+            <p class="hint" id="sd-deck-status"></p>
+          </div>
+          <div class="sd-info">
+            <div>
+              <h3>Pages</h3>
+              <ul class="hint">
+                <li>Page 1 — hide, matchup, reset, game 1–3, P1/P2 win, points ±, battlefields</li>
+                <li>One page per player with every deck card as a key (card art + name)</li>
+                <li>◀ Prev / Next ▶ on every page; extra pages when a deck exceeds the grid</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Before you start</h3>
+              <p class="hint">Quit the Elgato Stream Deck app completely (tray icon → Quit). Only one program can own the device. Keys follow deck and match changes automatically.</p>
+            </div>
+          </div>
+        </section>
       </section>
     </main>
 
-    <div id="toast" class="toast"></div>
-    <script type="module" src="control.js"></script>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="main.js"></script>
   </body>
 </html>

@@ -1,31 +1,7 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-export const APP_EXE_NAME = "Riftbound OBS.exe";
-
-const ELECTRON_UPDATE_BAT = `@echo off
-title Riftbound OBS — Update
-cd /d "%~dp0"
-echo Waiting for server to stop...
-timeout /t 8 /nobreak >nul
-set ELECTRON_RUN_AS_NODE=1
-set RIFTBOUND_ELECTRON=1
-set "RIFTBOUND_INSTALL_ROOT=%~dp0"
-if exist "%~dp0resources\\updater\\bootstrap.js" (
-  "%~dp0Riftbound OBS.exe" "%~dp0resources\\updater\\bootstrap.js"
-) else if exist "%~dp0resources\\riftbound\\server\\update-router.js" (
-  "%~dp0Riftbound OBS.exe" "%~dp0resources\\riftbound\\server\\update-router.js"
-) else (
-  echo Update scripts not found in install folder.
-  exit /b 1
-)
-if errorlevel 1 (
-  echo.
-  echo Update failed. Log: %APPDATA%\\RiftboundOBS\\updates\\update.log
-  pause
-  exit /b 1
-)
-`;
+const APP_EXE_NAME = "Riftbound OBS.exe";
 
 /** Where patch files (server/, public/) should be applied. */
 export function resolvePatchTargetRoot(installRoot) {
@@ -42,7 +18,7 @@ export function findBootstrapScript(installRoot) {
   return null;
 }
 
-export function findAppLauncher(installRoot) {
+function findAppLauncher(installRoot) {
   const normalized = installRoot.replace(/[\\/]+$/, "");
   const exe = join(normalized, APP_EXE_NAME);
   if (existsSync(exe)) return { kind: "exe", path: exe };
@@ -69,17 +45,6 @@ export function spawnAppLauncher(installRoot, { spawnFn, cwd }) {
     windowsHide: false,
   }).unref();
   return true;
-}
-
-/** Ensure Update Riftbound.bat exists next to the Electron exe (NSIS installs omit it). */
-export function ensureElectronUpdateBat(installRoot) {
-  const normalized = installRoot.replace(/[\\/]+$/, "");
-  const batPath = join(normalized, "Update Riftbound.bat");
-  if (existsSync(batPath)) return batPath;
-  const exe = join(normalized, APP_EXE_NAME);
-  if (!existsSync(exe)) return null;
-  writeFileSync(batPath, ELECTRON_UPDATE_BAT, "utf8");
-  return batPath;
 }
 
 /**
@@ -132,9 +97,4 @@ export function spawnUpdateApply(installRoot, { spawnFn, isElectron = false, par
     windowsHide: false,
   }).unref();
   return { ok: true };
-}
-
-/** @deprecated Use spawnUpdateApply */
-export function spawnPatchUpdate(installRoot, options) {
-  return spawnUpdateApply(installRoot, options);
 }
