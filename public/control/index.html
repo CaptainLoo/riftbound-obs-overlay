@@ -3,15 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TCG Overlay — Control Panel</title>
+    <title>Riftbound OBS — Control Panel</title>
     <link rel="stylesheet" href="control.css" />
   </head>
   <body>
     <header class="topbar">
-      <div class="topbar-brand">
-        <h1>TCG Overlay <span>Control</span></h1>
-        <span class="game-badge" id="game-badge" hidden></span>
-      </div>
+      <h1>Riftbound OBS <span>Control</span></h1>
       <nav class="tabs">
         <button class="tab active" data-tab="setup">Players &amp; Decks</button>
         <button class="tab" data-tab="match">Match</button>
@@ -19,7 +16,6 @@
         <button class="tab" data-tab="layout">Layout</button>
       </nav>
       <span class="app-version" id="app-version"></span>
-      <button type="button" class="btn ghost small" id="change-game">Change game</button>
       <select class="update-version-select hidden" id="update-version-select" title="Update version">
         <option value="latest">Latest stable</option>
       </select>

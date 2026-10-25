@@ -12,10 +12,7 @@ const matchupEl = document.getElementById("matchup");
 const sceneEl = document.getElementById("scene");
 const layoutCssEl = document.getElementById("layout-runtime-css");
 const sceneHoleEl = document.getElementById("scene-hole");
-const pokemonOverlayEl = document.createElement("div");
-pokemonOverlayEl.id = "pokemon-overlay";
-pokemonOverlayEl.className = "pokemon-overlay hidden";
-document.body.appendChild(pokemonOverlayEl);
+const sceneLayers = Array.from(document.querySelectorAll(".scene-layer"));
 
 const CARD_SLOTS = new Set(["p1.card", "p2.card"]);
 const HIDE_WHEN_EMPTY = new Set(["p1.card", "p2.card", "p1.battlefield", "p2.battlefield"]);
@@ -31,6 +28,7 @@ const MP_DELAY = {
   battlefieldStagger: 120,
   vs: 600,
 };
+const MP_MAX_DURATION_MS = 1300;
 const MP_EXIT_MS = 400;
 const MP_SCENE_FADE_MS = 450;
 
@@ -75,25 +73,42 @@ let matchupHash = "";
 let matchupExitTimer = null;
 let matchupEnterGen = 0;
 let matchupStageHideTimer = null;
+let matchupReadyFallbackTimer = null;
+
+// ---- Layout -----------------------------------------------------------------
+
+let lastLayoutCss = "";
+let cachedLayout = null;
+let sceneMaskActive = null;
 
 function applyLayoutCss(layout) {
-  if (layoutCssEl) layoutCssEl.textContent = layoutToCss(normalizeLayout(layout));
+  if (!layoutCssEl) return;
+  const css = layoutToCss(layout);
+  if (css === lastLayoutCss) return;
+  lastLayoutCss = css;
+  layoutCssEl.textContent = css;
 }
 
 function applySceneCutout(layout) {
-  const layers = document.querySelectorAll(".scene-layer");
   const active = updateSceneHoleMask(sceneHoleEl, layout?.playArea);
-  layers.forEach((el) => {
+  if (active === sceneMaskActive) return;
+  sceneMaskActive = active;
+  const mask = active ? "url(#scene-cutout-mask)" : "none";
+  for (const el of sceneLayers) {
     el.style.clipPath = "none";
     el.style.webkitClipPath = "none";
-    if (active) {
-      el.style.mask = "url(#scene-cutout-mask)";
-      el.style.webkitMask = "url(#scene-cutout-mask)";
-    } else {
-      el.style.mask = "none";
-      el.style.webkitMask = "none";
-    }
-  });
+    el.style.mask = mask;
+    el.style.webkitMask = mask;
+  }
+}
+
+// ---- Slots ------------------------------------------------------------------
+
+function onAnimationStart(e) {
+  e.currentTarget.classList.add("animating");
+}
+function onAnimationDone(e) {
+  e.currentTarget.classList.remove("animating");
 }
 
 function ensureSlot(id, kind) {
@@ -107,8 +122,14 @@ function ensureSlot(id, kind) {
     el.setAttribute("data-label", FRAME_LABELS[id] || "");
     const img = document.createElement("img");
     img.alt = "";
+    img.decoding = "async";
     el.appendChild(img);
-    els[id] = { el, img };
+    if (CARD_SLOTS.has(id)) {
+      el.addEventListener("animationstart", onAnimationStart);
+      el.addEventListener("animationend", onAnimationDone);
+      el.addEventListener("animationcancel", onAnimationDone);
+    }
+    els[id] = { el, img, gen: 0 };
   } else if (kind === "tally") {
     const inner = document.createElement("div");
     inner.className = "match-tally-inner";
@@ -127,9 +148,17 @@ function ensureSlot(id, kind) {
   return els[id];
 }
 
+function setText(node, value) {
+  if (node.textContent !== value) node.textContent = value;
+}
+
+function setClass(node, value) {
+  if (node.className !== value) node.className = value;
+}
+
 function clearCardAnimation(el) {
   for (const t of ANIM_TYPES) el.classList.remove(`anim-${t}`);
-  el.classList.remove("anim-from-left", "anim-from-right");
+  el.classList.remove("anim-from-left", "anim-from-right", "animating");
 }
 
 function playCardAnimation(el, type, side) {
@@ -140,63 +169,56 @@ function playCardAnimation(el, type, side) {
   if (type === "slide") el.classList.add(side === "p1" ? "anim-from-left" : "anim-from-right");
 }
 
+/**
+ * Decode an image off-DOM before swapping it into a slot, so the reveal never
+ * shows a half-loaded frame. Resolves true when this request was the latest one
+ * for the slot (a newer request cancels older ones).
+ */
+async function setSlotImage(slot, url) {
+  if (slot.img.getAttribute("src") === url) return true;
+  const gen = ++slot.gen;
+  const pre = new Image();
+  pre.decoding = "async";
+  pre.src = url;
+  try {
+    await pre.decode();
+  } catch {
+    /* broken or unsupported image: still swap so the frame shows something */
+  }
+  if (slot.gen !== gen) return false;
+  slot.img.src = url;
+  return true;
+}
+
+function clearSlotImage(slot) {
+  slot.gen += 1;
+  if (slot.img.hasAttribute("src")) slot.img.removeAttribute("src");
+}
+
+const preloaded = new Set();
+function preloadPlayerImages(state) {
+  for (const pl of state.players || []) {
+    const urls = [
+      pl?.legend?.imageLocal,
+      pl?.legend?.thumbLocal,
+      pl?.champion?.imageLocal,
+      ...(pl?.battlefields || []).map((b) => b?.thumbLocal),
+    ];
+    for (const url of urls) {
+      if (!url || preloaded.has(url)) continue;
+      preloaded.add(url);
+      const img = new Image();
+      img.decoding = "async";
+      img.src = url;
+    }
+  }
+}
+
 function escapeText(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function cardImage(card) {
-  return card?.imageLocal || card?.thumbLocal || "";
-}
-
-function prizeBalls(count) {
-  const n = Math.max(0, Math.min(6, Number(count) || 0));
-  return Array.from({ length: 6 }, (_, i) => `<span class="pkm-ball ${i < n ? "filled" : "spent"}"></span>`).join("");
-}
-
-function pokemonSideHtml(state, index, side) {
-  const player = state.players[index] || {};
-  const board = state.game?.pokemon?.[side] || {};
-  const active = board.active;
-  const img = cardImage(active);
-  const bench = Array.from({ length: 5 }, (_, i) => board.bench?.[i] || null);
-  return `
-    <section class="pokemon-side pokemon-${side}">
-      <header class="pkm-player">
-        <div>
-          <strong>${escapeText(player.pseudo || (side === "p1" ? "Player 1" : "Player 2"))}</strong>
-          <span>${escapeText(active?.name || "No active Pokémon")}</span>
-        </div>
-        <div class="pkm-prizes" aria-label="Prize cards left">${prizeBalls(state.game?.score?.[side])}</div>
-      </header>
-      <div class="pkm-active-card ${img ? "" : "empty"}">
-        ${img ? `<img src="${img}" alt="" />` : `<span>ACTIVE</span>`}
-      </div>
-      <div class="pkm-active-info">
-        <div class="pkm-active-title">
-          <strong>${escapeText(active?.name || "Choose an active Pokémon")}</strong>
-          <span>${escapeText(active?.hp ? `${active.hp} HP` : "")}</span>
-        </div>
-      </div>
-      <div class="pkm-bench">
-        ${bench
-          .map((card) => {
-            const benchImg = cardImage(card);
-            return `<div class="pkm-bench-card ${benchImg ? "" : "empty"}">${
-              benchImg ? `<img src="${benchImg}" alt="" /><span>${escapeText(card.name || "")}</span>` : `<span>EMPTY</span>`
-            }</div>`;
-          })
-          .join("")}
-      </div>
-    </section>`;
-}
-
-function renderPokemonOverlay(state) {
-  const show = state.meta?.gameId === "pokemon" && state.display?.mode !== "matchup";
-  pokemonOverlayEl.classList.toggle("hidden", !show);
-  stage.classList.toggle("pokemon-stage-hidden", show);
-  if (!show) return;
-  pokemonOverlayEl.innerHTML = `${pokemonSideHtml(state, 0, "p1")}${pokemonSideHtml(state, 1, "p2")}`;
-}
+// ---- Matchup ----------------------------------------------------------------
 
 function hashMatchup(state) {
   const parts = [];
@@ -279,29 +301,56 @@ function clearMatchupItemState() {
   });
 }
 
-function bindMatchupAnimationEnd() {
+function matchupSettleBudgetMs(state) {
+  const maxBf = Math.max(0, ...(state.players || []).map((p) => (p?.battlefields || []).length));
+  const lastDelay = Math.max(
+    MP_DELAY.pseudo,
+    MP_DELAY.legend,
+    MP_DELAY.champion,
+    MP_DELAY.vs,
+    MP_DELAY.battlefields + Math.max(0, maxBf - 1) * MP_DELAY.battlefieldStagger
+  );
+  return lastDelay + MP_MAX_DURATION_MS + 100;
+}
+
+function finishMatchupEnter() {
+  clearTimeout(matchupReadyFallbackTimer);
+  matchupReadyFallbackTimer = null;
+  matchupEl.querySelectorAll(".mp-item").forEach((el) => {
+    el.classList.add("mp-settled");
+    el.style.willChange = "";
+  });
+  matchupEl.classList.remove("matchup-entering");
+  matchupEl.classList.add("matchup-ready");
+}
+
+function bindMatchupAnimationEnd(state) {
   const items = [...matchupEl.querySelectorAll(".mp-item")];
   if (!items.length) {
-    matchupEl.classList.remove("matchup-entering");
-    matchupEl.classList.add("matchup-ready");
+    finishMatchupEnter();
     return;
   }
 
   let remaining = items.length;
-  const onEnd = (e) => {
+  const onDone = (e) => {
     const el = e.currentTarget;
+    el.removeEventListener("animationend", onDone);
+    el.removeEventListener("animationcancel", onDone);
     el.classList.add("mp-settled");
     el.style.willChange = "";
     remaining -= 1;
-    if (remaining <= 0) {
-      matchupEl.classList.remove("matchup-entering");
-      matchupEl.classList.add("matchup-ready");
-    }
+    if (remaining <= 0) finishMatchupEnter();
   };
 
   for (const el of items) {
-    el.addEventListener("animationend", onEnd, { once: true });
+    el.addEventListener("animationend", onDone);
+    el.addEventListener("animationcancel", onDone);
   }
+
+  clearTimeout(matchupReadyFallbackTimer);
+  matchupReadyFallbackTimer = setTimeout(() => {
+    if (matchupEl.classList.contains("matchup-entering")) finishMatchupEnter();
+  }, matchupSettleBudgetMs(state));
 }
 
 function hideStageAfterFade() {
@@ -327,6 +376,7 @@ async function enterMatchup(state) {
   matchupHash = hash;
 
   clearTimeout(matchupExitTimer);
+  clearTimeout(matchupReadyFallbackTimer);
   matchupEl.classList.remove("matchup-exiting", "matchup-ready");
   if (needRebuild) {
     buildMatchupDom(state);
@@ -345,13 +395,14 @@ async function enterMatchup(state) {
 
   void matchupEl.offsetWidth;
   matchupEl.classList.add("matchup-entering");
-  bindMatchupAnimationEnd();
+  bindMatchupAnimationEnd(state);
   hideStageAfterFade();
 }
 
 function exitMatchup(onDone) {
   matchupEnterGen += 1;
   clearTimeout(matchupStageHideTimer);
+  clearTimeout(matchupReadyFallbackTimer);
   matchupEl.classList.remove("matchup-entering", "matchup-ready");
   matchupEl.classList.add("matchup-exiting");
   showStageForGame();
@@ -364,24 +415,56 @@ function exitMatchup(onDone) {
   }, MP_EXIT_MS);
 }
 
+// ---- Scene + slots ----------------------------------------------------------
+
 function formatLabel(fmt) {
   const map = { bo1: "Bo1", bo3: "Bo3", bo5: "Bo5" };
   return map[fmt] || String(fmt || "Bo3").toUpperCase();
 }
 
-function applyGameTheme(gameId) {
-  document.body.dataset.game = gameId || "riftbound";
-}
+const sceneNodes = {
+  event: document.getElementById("scene-event"),
+  p1: document.getElementById("scene-score-p1"),
+  p2: document.getElementById("scene-score-p2"),
+  game: document.getElementById("scene-game"),
+};
 
 function renderScene(state) {
-  applyGameTheme(state.meta?.gameId);
-  const eventEl = document.getElementById("scene-event");
-  if (!eventEl) return;
+  if (!sceneNodes.event) return;
+  setText(sceneNodes.event, `Riftbound · ${formatLabel(state.match.format)}`);
+  setText(sceneNodes.p1, String(state.game.score.p1));
+  setText(sceneNodes.p2, String(state.game.score.p2));
+  setText(sceneNodes.game, `Game ${state.match.currentGame + 1}`);
+}
 
-  eventEl.textContent = `${state.meta?.gameName || "TCG"} · ${formatLabel(state.match.format)}`;
-  document.getElementById("scene-score-p1").textContent = state.game.score.p1;
-  document.getElementById("scene-score-p2").textContent = state.game.score.p2;
-  document.getElementById("scene-game").textContent = `Game ${state.match.currentGame + 1}`;
+function renderImageSlot(id, slot, value, state) {
+  const hasValue = value !== undefined && value !== null && value !== "";
+  if (!hasValue) {
+    clearSlotImage(slot);
+    clearCardAnimation(slot.el);
+    delete cardAnimState[id];
+    return;
+  }
+
+  if (!CARD_SLOTS.has(id)) {
+    setSlotImage(slot, value);
+    return;
+  }
+
+  const side = id.startsWith("p1") ? "p1" : "p2";
+  const anim = state.display.cardAnimation || "pop";
+  const tick = state.display.cardReveal?.[side] ?? 0;
+  const prev = cardAnimState[id] || { tick: -1, anim: "" };
+  const shouldAnimate = tick !== prev.tick || anim !== prev.anim;
+  cardAnimState[id] = { tick, anim };
+
+  if (slot.img.getAttribute("src") === value) {
+    if (shouldAnimate) playCardAnimation(slot.el, anim, side);
+    return;
+  }
+  setSlotImage(slot, value).then((latest) => {
+    if (latest && shouldAnimate) playCardAnimation(slot.el, anim, side);
+  });
 }
 
 function renderGameSlots(state, layout) {
@@ -399,36 +482,18 @@ function renderGameSlots(state, layout) {
       const hideWhenEmpty = HIDE_WHEN_EMPTY.has(id);
       slot.el.classList.toggle("hidden", !show || (hideWhenEmpty && !hasValue));
       slot.el.classList.toggle("empty", !hideWhenEmpty && !hasValue);
-
-      if (hasValue && slot.img.getAttribute("src") !== value) {
-        slot.img.src = value;
-      } else if (!hasValue) {
-        slot.img.removeAttribute("src");
-        clearCardAnimation(slot.el);
-        delete cardAnimState[id];
-      }
-
-      if (CARD_SLOTS.has(id) && hasValue) {
-        const side = id.startsWith("p1") ? "p1" : "p2";
-        const anim = state.display.cardAnimation || "pop";
-        const tick = state.display.cardReveal?.[side] ?? 0;
-        const prev = cardAnimState[id] || { tick: -1, anim: "" };
-        if (tick !== prev.tick || anim !== prev.anim) {
-          playCardAnimation(slot.el, anim, side);
-          cardAnimState[id] = { tick, anim };
-        }
-      }
+      renderImageSlot(id, slot, value, state);
     } else if (def.kind === "tally") {
       slot.el.classList.toggle("hidden", !show);
-      if (slot.span) slot.span.textContent = def.get(state) || "0 – 0";
+      if (slot.span) setText(slot.span, def.get(state) || "0 – 0");
     } else if (def.kind === "chrome") {
       slot.el.classList.toggle("hidden", !show);
     } else if (def.kind === "text") {
       const value = def.get(state);
       const hasValue = value !== undefined && value !== null && value !== "";
       slot.el.classList.toggle("hidden", !show || !hasValue);
-      slot.span.textContent = hasValue ? value : "";
-      slot.span.className = `slot-text align-${cfg.align || "left"}`;
+      setText(slot.span, hasValue ? String(value) : "");
+      setClass(slot.span, `slot-text align-${cfg.align || "left"}`);
     }
   }
 }
@@ -436,9 +501,8 @@ function renderGameSlots(state, layout) {
 function render(state, info = { type: "state", sections: [] }) {
   const sections = new Set(info.sections || []);
   const isFull = info.type !== "patch";
-  const sceneChanged =
-    isFull || sections.has("meta") || sections.has("match") || sections.has("game");
-  const layoutChanged = isFull || sections.has("layout");
+  const sceneChanged = isFull || sections.has("match") || sections.has("game");
+  const layoutChanged = isFull || sections.has("layout") || !cachedLayout;
   const displayChanged =
     isFull ||
     sections.has("display") ||
@@ -447,23 +511,22 @@ function render(state, info = { type: "state", sections: [] }) {
     sections.has("match");
 
   if (sceneChanged) renderScene(state);
-  renderPokemonOverlay(state);
+  if (isFull || sections.has("players")) preloadPlayerImages(state);
 
-  const layout = normalizeLayout(state.layout);
   if (layoutChanged) {
-    applyLayoutCss(layout);
-    applySceneCutout(layout);
+    cachedLayout = normalizeLayout(state.layout);
+    applyLayoutCss(cachedLayout);
+    applySceneCutout(cachedLayout);
   }
+  const layout = cachedLayout;
 
-  if (!displayChanged && layoutChanged) return;
+  if (!displayChanged) return;
 
   const mode = state.display.mode === "matchup" ? "matchup" : "persistent";
   const prev = lastDisplayMode;
 
   if (mode === "matchup") {
-    if (prev !== "matchup") {
-      enterMatchup(state);
-    } else if (hashMatchup(state) !== matchupHash) {
+    if (prev !== "matchup" || hashMatchup(state) !== matchupHash) {
       enterMatchup(state);
     }
     lastDisplayMode = mode;
