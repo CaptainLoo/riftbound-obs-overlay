@@ -143,7 +143,7 @@ export async function stopStreamDeckSafe({ quickClose = false } = {}) {
   }
 }
 
-export async function waitForStreamDeckStatus(timeoutMs = 15000) {
+async function waitForStreamDeckStatus(timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {

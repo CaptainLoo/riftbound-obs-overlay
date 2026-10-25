@@ -20,8 +20,9 @@ npm run publish        # bump + release GitHub (voir README)
 - `server/index.js` démarre Express, le WebSocket (`hub.js`) et le worker Stream Deck.
 - `server/db.js` : base lowdb (un fichier JSON plat `{ cardsCache, players, match, display, layout }`) et migrations défensives.
 - `server/routes/*` (HTTP) appellent `server/services/*` (logique) ; l'état est diffusé par sections (`players`, `match`, `game`, `display`, `layout`) via `hub.broadcastPatch`.
-- `server/riftscribe.js` : API RiftScribe + cache d'images dans `data/cards/`.
-- `server/streamdeck*.js` : le HID tourne dans un processus enfant (`streamdeckWorker.js`), qui ne doit **jamais** importer `db.js` ; il reçoit un modèle du serveur et rend les touches avec sharp.
+- `server/persist.js` : unique chemin d'écriture (`markDirty()` débouncé, `flush()` à l'arrêt). `stateService.commit(sections)` = diffusion + markDirty.
+- `server/riftscribe.js` : API RiftScribe (mémorisée, un réessai) + cache d'images dans `data/cards/` ; `util/pool.js` et `util/memo.js` pour la concurrence.
+- `server/streamdeck*.js` : le HID tourne dans un processus enfant (`streamdeckWorker.js`) qui ne doit **jamais** importer `db.js`. Le serveur construit `streamdeck/model.js` et le pousse par IPC (`streamdeck/transport.js`) ; le worker rend les touches avec sharp et répare les images via `POST /api/cards/repair`. Statut diffusé aux navigateurs en trame WS `{type:"streamdeck"}`.
 - `server/update*.js`, `updater.js` : mises à jour Windows (patch zip ou installeur), voir README.
 - `public/overlay` (Browser Source), `public/control` (panneau), `public/shared` (client WS, maths de layout). ES modules servis tels quels : pas de bundler, pas de framework.
 - Données utilisateur : `data/` en dev, `%APPDATA%\RiftboundOBS` ou `~/Library/Application Support/RiftboundOBS` en release.

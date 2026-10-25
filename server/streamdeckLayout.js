@@ -10,7 +10,7 @@ export const DEVICES = {
 };
 
 /** Linear key index (row-major), matches @elgato-stream-deck/core grid. */
-export function keyIndex(device, col, row) {
+function keyIndex(device, col, row) {
   return row * device.cols + col;
 }
 

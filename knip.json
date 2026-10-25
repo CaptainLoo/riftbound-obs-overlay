@@ -1,19 +1,31 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "server/index.js",
     "server/streamdeckWorker.js",
     "server/update-router.js",
     "server/update-apply.js",
-    "electron/main.cjs",
     "electron/preload.cjs",
     "electron/updater/bootstrap.js",
     "scripts/*.mjs",
     "public/**/*.js",
     "tests/*.test.mjs"
   ],
-  "project": ["server/**/*.js", "electron/**/*.{js,cjs}", "scripts/**/*.mjs", "public/**/*.js", "tests/**/*.mjs"],
-  "paths": { "/shared/*": ["public/shared/*"] },
-  "ignoreDependencies": ["@electron/rebuild", "electron-builder", "jpeg-js"],
-  "ignoreBinaries": ["iscc", "gh", "zip", "unzip", "powershell", "electron-rebuild", "start"]
+  "project": [
+    "server/**/*.js",
+    "electron/**/*.{js,cjs}",
+    "scripts/**/*.mjs",
+    "public/**/*.js",
+    "tests/**/*.mjs"
+  ],
+  "paths": {
+    "/shared/*": [
+      "public/shared/*"
+    ]
+  },
+  "ignoreDependencies": [
+    "jpeg-js"
+  ],
+  "ignoreBinaries": [
+    "start"
+  ]
 }

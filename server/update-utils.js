@@ -43,11 +43,11 @@ export function pendingPath() {
   return join(updatesDir(), "pending.json");
 }
 
-export function lockPath() {
+function lockPath() {
   return join(updatesDir(), "apply.lock");
 }
 
-export function progressPath() {
+function progressPath() {
   return join(updatesDir(), "download-progress.json");
 }
 
@@ -178,11 +178,11 @@ export function isLocalRequest(req) {
   );
 }
 
-export function applyStatusPath() {
+function applyStatusPath() {
   return join(updatesDir(), "apply-status.json");
 }
 
-export function lastUpdatePath() {
+function lastUpdatePath() {
   return join(updatesDir(), "last-update.json");
 }
 

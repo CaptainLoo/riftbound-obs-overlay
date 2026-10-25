@@ -5,7 +5,7 @@ function stableStringify(value) {
 }
 
 /** Deck layout, player names and card metadata used on Stream Deck pages. */
-export function fingerprintStructure(model) {
+function fingerprintStructure(model) {
   return stableStringify({
     players: (model?.players || []).map((p) => ({
       id: p.id,
@@ -18,7 +18,7 @@ export function fingerprintStructure(model) {
 }
 
 /** Match state that affects Controls page labels only. */
-export function fingerprintControls(model) {
+function fingerprintControls(model) {
   const match = model?.match || {};
   return stableStringify({
     currentGame: match.currentGame ?? 0,
@@ -53,7 +53,7 @@ export function snapshotRevision(model) {
   };
 }
 
-export function controlsDynamicKeyIndices(page) {
+function controlsDynamicKeyIndices(page) {
   if (!page?.keys) return [];
   return [...page.keys.entries()]
     .filter(([, def]) => DYNAMIC_KEY_TYPES.has(def.type))

@@ -18,7 +18,7 @@ export function activeGameData() {
  * Coalesce broadcasts: several mutations within one frame produce one patch
  * carrying the union of their sections (or one full state if any asked for it).
  */
-export function scheduleBroadcast(sections = null) {
+function scheduleBroadcast(sections = null) {
   if (sections) {
     for (const section of Array.isArray(sections) ? sections : [sections]) pendingSections.add(section);
   } else {

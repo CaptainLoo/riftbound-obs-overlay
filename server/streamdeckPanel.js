@@ -1,6 +1,6 @@
 import { runPool } from "./streamdeckImageWarm.js";
 
-export function getPanelLayout(deck) {
+function getPanelLayout(deck) {
   const dims = deck.calculateFillPanelDimensions?.();
   if (!dims) return null;
 

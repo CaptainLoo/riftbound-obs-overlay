@@ -1,5 +1,4 @@
 import { runPool } from "./util/pool.js";
-import { collectPageCardIds } from "./streamdeckCardAssets.js";
 
 export { runPool };
 import { renderPagePanel } from "./streamdeckPanel.js";
@@ -27,20 +26,13 @@ function isCardPage(page) {
 /**
  * Pre-render card key images (art + label composite) into memory cache.
  */
-export async function warmPageCardKeys(page, cardsCache, keySize, renderKeyImage, concurrency = DEFAULT_CONCURRENCY) {
+async function warmPageCardKeys(page, cardsCache, keySize, renderKeyImage, concurrency = DEFAULT_CONCURRENCY) {
   if (!page?.keys) return;
   const tasks = [];
   for (const keyDef of page.keys.values()) {
     if (!CARD_KEY_TYPES.has(keyDef.type)) continue;
     tasks.push(() => renderKeyImage(keyDef, cardsCache, keySize));
   }
-  await runPool(tasks, concurrency);
-}
-
-/** Warm card art for ids on a page (lighter — used when only art cache needed). */
-export async function warmPageCardArt(page, cardsCache, keySize, renderCardArtOnly, concurrency = DEFAULT_CONCURRENCY) {
-  const ids = collectPageCardIds(page);
-  const tasks = ids.map((id) => () => renderCardArtOnly(id, cardsCache, keySize));
   await runPool(tasks, concurrency);
 }
 

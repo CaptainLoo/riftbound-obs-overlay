@@ -44,11 +44,11 @@ const GITHUB_HEADERS = {
 const INSTALLER_CI_MESSAGE =
   "Full installer not uploaded yet — CI is still building it (usually a few minutes). Download riftbound-setup from GitHub Releases if needed.";
 
-export function isUpdateSupported() {
+function isUpdateSupported() {
   return platform() === "win32" && (IS_PORTABLE || IS_INSTALLER || IS_ELECTRON);
 }
 
-export function getInstallType() {
+function getInstallType() {
   if (IS_ELECTRON) return "electron";
   if (IS_INSTALLER) return "installer";
   if (IS_PORTABLE) return "portable";
@@ -660,17 +660,4 @@ export async function runApplyShutdownAfterResponse(prepared) {
       error: err.message,
     });
   }
-}
-
-/** @deprecated Use prepareApplyUpdate + runApplyShutdownAfterResponse */
-export async function applyUpdate(applyTokenFromClient) {
-  const prepared = await prepareApplyUpdate(applyTokenFromClient);
-  await runApplyShutdownAfterResponse(prepared);
-  return {
-    ok: true,
-    message: "Applying update and restarting…",
-    expectedVersion: prepared.expectedVersion,
-    mode: prepared.mode,
-    logPath: prepared.logPath,
-  };
 }

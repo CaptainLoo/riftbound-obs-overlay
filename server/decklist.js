@@ -14,7 +14,7 @@ const CATEGORY_HEADERS = [
 
 const LINE_RE = /^(\d+)\s*x?\s+(.+?)\s*$/i;
 
-export function emptyParsed() {
+function emptyParsed() {
   return { legend: [], champions: [], maindeck: [], battlefields: [], runes: [], sideboard: [] };
 }
 

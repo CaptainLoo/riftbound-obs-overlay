@@ -24,7 +24,7 @@ function logDir() {
   return join(homedir(), ".config", "riftbound-obs");
 }
 
-export function startupLogPath() {
+function startupLogPath() {
   return join(logDir(), "startup.log");
 }
 

@@ -41,7 +41,7 @@ function localFile(localPath) {
   return localPath ? join(CARDS_DIR, basename(localPath)) : null;
 }
 
-export function hasLocalCardAsset(cardId, cards = {}) {
+function hasLocalCardAsset(cardId, cards = {}) {
   const meta = cards[cardId];
   if (!meta) return false;
   for (const ref of [meta.thumbLocal, meta.imageLocal]) {

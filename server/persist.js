@@ -76,4 +76,3 @@ const persister = createPersister({ write: () => db.write() });
 
 export const markDirty = persister.markDirty;
 export const flush = persister.flush;
-export const isDirty = persister.isDirty;
