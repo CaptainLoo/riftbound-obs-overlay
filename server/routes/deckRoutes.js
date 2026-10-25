@@ -43,8 +43,8 @@ deckRoutes.post("/decklist/preview", async (req, res) => {
 
 deckRoutes.post("/players/:id/deck", async (req, res) => {
   try {
-    const deck = await savePlayerDeck(req.params.id, req.body?.deck ?? {});
-    res.json({ ok: true, deck });
+    const { deck, pendingImages } = await savePlayerDeck(req.params.id, req.body?.deck ?? {});
+    res.json({ ok: true, deck, pendingImages });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

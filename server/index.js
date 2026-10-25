@@ -31,8 +31,6 @@ export async function startServer(options = {}) {
     throw err;
   }
 
-  verifyPostUpdateBoot();
-
   const app = express();
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -81,6 +79,12 @@ export async function startServer(options = {}) {
   });
   logStartup(`listen OK (port ${port})`);
 
+  // Everything below is off the critical path: the UI can already load.
+  setImmediate(() => {
+    verifyPostUpdateBoot();
+    writeAppPid();
+  });
+
   console.log("Riftbound OBS Overlay");
   console.log(`  Overlay (Browser Source) : http://localhost:${port}/overlay`);
   console.log(`  Control panel            : http://localhost:${port}/control`);
@@ -108,7 +112,6 @@ export async function startServer(options = {}) {
     });
   };
 
-  writeAppPid();
   registerShutdownForUpdate(async () => {
     await close();
   });
