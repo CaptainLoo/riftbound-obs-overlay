@@ -44,7 +44,17 @@ export async function startServer(options = {}) {
   app.use(express.json({ limit: "1mb" }));
 
   app.use("/api", router);
-  app.use("/cards", express.static(join(DATA_DIR, "cards"), { maxAge: "1h" }));
+  // Card files are named by card id and never rewritten in place: cache them hard.
+  app.use(
+    "/cards",
+    express.static(join(DATA_DIR, "cards"), {
+      maxAge: "365d",
+      immutable: true,
+      etag: false,
+      lastModified: false,
+      index: false,
+    })
+  );
   app.use("/control", express.static(`${PUBLIC_DIR}/control`));
   app.use("/overlay", express.static(`${PUBLIC_DIR}/overlay`));
   app.use("/shared", express.static(`${PUBLIC_DIR}/shared`));

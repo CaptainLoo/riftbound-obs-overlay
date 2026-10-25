@@ -3,8 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { IS_ELECTRON, ROOT_DIR } from "./paths.js";
 
+let cachedPackage = null;
+
+/** package.json of the running content root (read once; the process restarts after an update). */
 export function readPackageJson() {
-  return JSON.parse(readFileSync(join(ROOT_DIR, "package.json"), "utf8"));
+  if (!cachedPackage) {
+    cachedPackage = JSON.parse(readFileSync(join(ROOT_DIR, "package.json"), "utf8"));
+  }
+  return cachedPackage;
 }
 
 export function getVersion() {

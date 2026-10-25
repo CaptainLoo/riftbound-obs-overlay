@@ -4,28 +4,44 @@ import { join, extname, basename } from "node:path";
 import { db } from "./db.js";
 import { CARDS_DIR } from "./paths.js";
 import { markDirty } from "./persist.js";
+import { memoAsync } from "./util/memo.js";
 
 const API_BASE = "https://riftscribe.gg/api";
 
-async function fetchJson(url) {
+const RETRY_DELAY_MS = 500;
+
+async function fetchJson(url, attempt = 0) {
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) {
+    // One retry on rate limiting / transient upstream errors.
+    if (attempt === 0 && (res.status === 429 || res.status >= 500)) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      return fetchJson(url, attempt + 1);
+    }
     throw new Error(`RiftScribe request failed (${res.status}) for ${url}`);
   }
   return res.json();
 }
 
-/** Typeahead search by name. Returns lightweight candidates. */
+const searchMemo = memoAsync(
+  (q) => fetchJson(`${API_BASE}/cards/search?q=${encodeURIComponent(q)}`),
+  { ttlMs: 10 * 60 * 1000, max: 500, key: (q) => q }
+);
+const detailMemo = memoAsync(
+  (cardId) => fetchJson(`${API_BASE}/cards/${encodeURIComponent(cardId)}`),
+  { ttlMs: 60 * 60 * 1000, max: 1000, key: (id) => id }
+);
+
+/** Typeahead search by name (memoized 10 min). Returns lightweight candidates. */
 export async function searchByName(name) {
   const q = String(name || "").trim();
   if (q.length < 2) return [];
-  const url = `${API_BASE}/cards/search?q=${encodeURIComponent(q)}`;
-  return fetchJson(url);
+  return searchMemo(q.toLowerCase());
 }
 
-/** Full card detail from the API (not cached). */
+/** Full card detail from the API (memoized 1 h). */
 export async function fetchCardDetail(cardId) {
-  return fetchJson(`${API_BASE}/cards/${encodeURIComponent(cardId)}`);
+  return detailMemo(String(cardId));
 }
 
 function fileExists(path) {
