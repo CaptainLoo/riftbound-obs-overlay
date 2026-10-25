@@ -49,8 +49,7 @@ app.on("child-process-gone", (_event, details) => {
   if (details?.type !== "GPU") return;
   logStartup(`[main] GPU process gone: ${details.reason}`);
   const early = process.uptime() * 1000 < GPU_WATCH_MS;
-  const alreadyRelaunched = process.env.RIFTBOUND_GPU_RELAUNCHED === "1";
-  if (!early || alreadyRelaunched || fs.existsSync(GPU_OPT_OUT_FLAG)) return;
+  if (!early || fs.existsSync(GPU_OPT_OUT_FLAG)) return;
   if (["clean-exit", "killed"].includes(details.reason)) return;
   try {
     fs.writeFileSync(GPU_OPT_OUT_FLAG, `${new Date().toISOString()} ${details.reason}\n`, "utf8");
@@ -58,7 +57,8 @@ app.on("child-process-gone", (_event, details) => {
     /* ignore */
   }
   logStartup("Relaunching with hardware acceleration disabled");
-  app.relaunch({ env: { ...process.env, RIFTBOUND_GPU_RELAUNCHED: "1" } });
+  // The opt-out flag written above is what stops a relaunch loop.
+  app.relaunch();
   app.exit(0);
 });
 

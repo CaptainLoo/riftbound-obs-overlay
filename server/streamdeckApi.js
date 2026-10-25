@@ -86,14 +86,16 @@ function spawnWorker() {
 
   child.on("exit", (code, signal) => {
     logStartup(`[streamdeck] worker exited (code ${code ?? "?"}${signal ? `, ${signal}` : ""})`);
-    const crashed = code !== 0 && code != null;
+    const intentional = child.riftboundStopping === true;
+    const crashed = !intentional && code !== 0 && code != null;
     const prev = lastStatus || idleStatus();
     setLastStatus({
       ...prev,
       worker: false,
       connected: false,
       phase: crashed ? "error" : "idle",
-      error: crashed ? prev.error || "Stream Deck worker stopped unexpectedly. Click Reconnect." : prev.error,
+      error: crashed ? prev.error || "Stream Deck worker stopped unexpectedly. Click Reconnect." : null,
+      hint: intentional ? "Stream Deck released." : prev.hint,
     });
     if (worker === child) {
       worker = null;
@@ -120,6 +122,7 @@ export async function startStreamDeckSafe() {
 export async function stopStreamDeckSafe({ quickClose = false } = {}) {
   const child = worker;
   if (!child) return;
+  child.riftboundStopping = true;
   worker = null;
   const t = transport;
   transport = null;
@@ -183,8 +186,10 @@ export function queueStreamDeckRefreshImages(force = true) {
  * Push the current model to the worker when its revision changed.
  * Called by stateService after each broadcast, and on worker start.
  */
-export function pushStreamDeckModel(force = false) {
+export function pushStreamDeckModel(force = false, sections = null) {
   if (!transport) return false;
+  // Layout-only changes never affect the keys: skip building the model.
+  if (!force && Array.isArray(sections) && sections.length && sections.every((s) => s === "layout")) return false;
   const model = buildStreamDeckModel();
   if (!force && model.rev === lastModelRev) return false;
   lastModelRev = model.rev;

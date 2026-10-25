@@ -33,7 +33,7 @@ function scheduleBroadcast(sections = null) {
     pendingSections.clear();
     if (full || !list.length) broadcastState();
     else broadcastPatch(list);
-    pushStreamDeckModel();
+    pushStreamDeckModel(false, full ? null : list);
   }, BROADCAST_DEBOUNCE_MS);
 }
 

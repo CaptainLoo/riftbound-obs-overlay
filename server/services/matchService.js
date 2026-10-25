@@ -72,7 +72,7 @@ export async function setSelection({ gameIndex, player, slot, cardId }) {
   }
   if (cardId) await cacheMany([cardId]);
   game[slot][player] = cardId || null;
-  commit(["game", "players"]);
+  commit(["game"]);
   return game;
 }
 
@@ -87,7 +87,7 @@ export async function hotBattlefield({ player, cardId }) {
   if (!game) throw Object.assign(new Error("invalid game"), { status: 400 });
   await cacheMany([cardId]);
   game.battlefield[player] = cardId;
-  commit(["game", "players"]);
+  commit(["game"]);
   return { gameIndex, player, cardId, name: gameData.cardsCache[cardId]?.name || cardId, game };
 }
 
