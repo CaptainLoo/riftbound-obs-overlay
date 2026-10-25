@@ -6,7 +6,6 @@ import {
   setMatchFormat,
   setSelection,
   updateMatch,
-  updatePokemonBoard,
   winGame,
 } from "../services/matchService.js";
 
@@ -52,14 +51,6 @@ matchRoutes.post("/match/selection", async (req, res) => {
   }
 });
 
-matchRoutes.post("/match/pokemon-board", async (req, res) => {
-  try {
-    res.json({ ok: true, ...(await updatePokemonBoard(req.body ?? {})) });
-  } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
-  }
-});
-
 matchRoutes.get("/hot/win/:player", async (req, res) => {
   try {
     res.json({ ok: true, match: await winGame(req.params.player) });
@@ -89,4 +80,3 @@ matchRoutes.get("/hot/score/:player/:op", async (req, res) => {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
-

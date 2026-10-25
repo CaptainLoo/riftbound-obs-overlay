@@ -1,7 +1,6 @@
 import { Router } from "express";
-import { CARD_ANIMATIONS, getActiveGameId } from "../db.js";
+import { CARD_ANIMATIONS, db } from "../db.js";
 import { playerDisplayCards, resolveDisplayCard } from "../deckCards.js";
-import { activeGameData } from "../services/stateService.js";
 import { findPlayer, validatePlayerId } from "../services/playerService.js";
 import {
   clearDisplay,
@@ -16,7 +15,7 @@ export const displayRoutes = Router();
 displayRoutes.get("/players/:id/cards", (req, res) => {
   const player = findPlayer(req.params.id);
   if (!player) return res.status(404).json({ error: "unknown player" });
-  res.json(playerDisplayCards(player, activeGameData().cardsCache, getActiveGameId()));
+  res.json(playerDisplayCards(player, db.data.cardsCache));
 });
 
 displayRoutes.get("/hot/card/:player/:cardId", async (req, res) => {
@@ -25,7 +24,7 @@ displayRoutes.get("/hot/card/:player/:cardId", async (req, res) => {
   const cardId = decodeURIComponent(req.params.cardId);
   try {
     const display = await setDisplayCard(player, cardId);
-    const name = activeGameData().cardsCache[cardId]?.name || cardId;
+    const name = db.data.cardsCache[cardId]?.name || cardId;
     res.json({ ok: true, player, cardId, name, display });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -37,11 +36,11 @@ displayRoutes.get("/hot/card/:player/index/:index", async (req, res) => {
   if (!validatePlayerId(player)) return res.status(400).json({ error: "invalid player" });
   const p = findPlayer(player);
   const index = Number(req.params.index);
-  const cardId = resolveDisplayCard(p.deck, activeGameData().cardsCache, { index }, getActiveGameId());
+  const cardId = resolveDisplayCard(p.deck, db.data.cardsCache, { index });
   if (!cardId) return res.status(404).json({ error: "card not found for index" });
   try {
     const display = await setDisplayCard(player, cardId);
-    const name = activeGameData().cardsCache[cardId]?.name || cardId;
+    const name = db.data.cardsCache[cardId]?.name || cardId;
     res.json({ ok: true, player, cardId, name, index, display });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -115,4 +114,3 @@ displayRoutes.post("/display/clear", async (req, res) => {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
-

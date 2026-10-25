@@ -1,4 +1,4 @@
-import { cacheCard } from "../cardProvider.js";
+import { cacheCard } from "../riftscribe.js";
 
 export async function cacheMany(ids) {
   const unique = [...new Set(ids.filter(Boolean))];
@@ -10,4 +10,3 @@ export async function cacheMany(ids) {
     }
   }
 }
-

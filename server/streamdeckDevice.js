@@ -1,4 +1,4 @@
-import { getActiveGameData } from "./db.js";
+import { db } from "./db.js";
 import { buildPages, detectDeviceKey } from "./streamdeckLayout.js";
 import {
   collectPageCardIds,
@@ -261,7 +261,7 @@ async function prefetchCardAssets(cardIds) {
 }
 
 async function prefetchForCurrentContext() {
-  const allIds = collectStreamDeckCardIds(getActiveGameData(), deviceKey);
+  const allIds = collectStreamDeckCardIds(db.data, deviceKey);
   const page = pages[currentPageIndex];
   const pageIds = page ? collectPageCardIds(page) : [];
   const priorityIds = [...new Set([...pageIds, ...allIds])];
@@ -369,7 +369,7 @@ async function handleKeyAction(keyDef, keyIndex) {
         return;
       case "pokemonBoardSet": {
         if (!s.player || !s.cardId) return;
-        const data = getActiveGameData();
+        const data = db.data;
         const game = data.match?.games?.[data.match?.currentGame ?? 0];
         const side = game?.pokemon?.[s.player] || { active: null, bench: [] };
         const bench = Array.isArray(side.bench) ? [...side.bench] : [];
@@ -441,13 +441,13 @@ function scheduleAdjacentWarm() {
   setImmediate(async () => {
     try {
       const { renderKeyImage, getIconColorForKeyDef } = await loadImagesMod();
-      await warmAdjacentPages(pages, currentPageIndex, getActiveGameData().cardsCache, keySize, renderKeyImage);
+      await warmAdjacentPages(pages, currentPageIndex, db.data.cardsCache, keySize, renderKeyImage);
       if (typeof deck.fillPanelBuffer === "function") {
         await warmAdjacentPanelPages(
           deck,
           pages,
           currentPageIndex,
-          getActiveGameData().cardsCache,
+          db.data.cardsCache,
           renderKeyImage,
           getIconColorForKeyDef
         );
@@ -476,7 +476,7 @@ async function renderKeysBatch(indices, page, generation, { onProgress } = {}) {
 
         try {
           const rgb = await withTimeout(
-            renderKeyImage(keyDef, getActiveGameData().cardsCache, keySize),
+            renderKeyImage(keyDef, db.data.cardsCache, keySize),
             KEY_RENDER_TIMEOUT_MS,
             `Key ${idx} render`
           );
@@ -675,7 +675,7 @@ async function drawCurrentPageViaPanel(generation, { showProgress = true } = {})
     const rgbPanel = await renderPagePanel(
       deck,
       page,
-      getActiveGameData().cardsCache,
+      db.data.cardsCache,
       renderKeyImage,
       getIconColorForKeyDef,
       { concurrency: RENDER_CONCURRENCY }
@@ -832,7 +832,7 @@ async function drawCurrentPage() {
 async function rebuildPages(resetPage = false) {
   if (!deck) return;
   deviceKey = detectDeviceKey(deck);
-  pages = buildPages(getActiveGameData(), deviceKey);
+  pages = buildPages(db.data, deviceKey);
   if (resetPage || currentPageIndex >= pages.length) currentPageIndex = 0;
   setStatus({
     deviceKey,
@@ -850,7 +850,7 @@ export async function refreshStreamDeck(force = false) {
   try {
     deviceKey = detectDeviceKey(deck);
     const oldPages = pages;
-    const mode = force ? "full" : classifyStreamDeckRefresh(lastRevision, getActiveGameData(), deviceKey);
+    const mode = force ? "full" : classifyStreamDeckRefresh(lastRevision, db.data, deviceKey);
 
     if (mode === "skip" && !force) {
       setStatus({ refreshMode: "skip" });
@@ -863,9 +863,9 @@ export async function refreshStreamDeck(force = false) {
       clearPanelHidCache();
     }
 
-    pages = buildPages(getActiveGameData(), deviceKey);
+    pages = buildPages(db.data, deviceKey);
     if (currentPageIndex >= pages.length) currentPageIndex = 0;
-    lastRevision = snapshotRevision(getActiveGameData(), deviceKey);
+    lastRevision = snapshotRevision(db.data, deviceKey);
 
     setStatus({
       deviceKey,
@@ -1011,8 +1011,8 @@ export async function startStreamDeck() {
 
     deviceKey = detectDeviceKey(deck);
     currentPageIndex = 0;
-    pages = buildPages(getActiveGameData(), deviceKey);
-    lastRevision = snapshotRevision(getActiveGameData(), deviceKey);
+    pages = buildPages(db.data, deviceKey);
+    lastRevision = snapshotRevision(db.data, deviceKey);
 
     setStatus({
       error: null,

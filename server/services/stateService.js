@@ -1,4 +1,4 @@
-import { db, getActiveGameData, getActiveGameId } from "../db.js";
+import { db } from "../db.js";
 import { broadcastPatch, broadcastState } from "../hub.js";
 
 let writeTimer = null;
@@ -10,21 +10,13 @@ let pendingBroadcastSections = new Set();
 const WRITE_DEBOUNCE_MS = 120;
 const BROADCAST_DEBOUNCE_MS = 32;
 
+/** The single in-memory app state (players, match, display, layout, cardsCache). */
 export function activeGameData() {
-  return getActiveGameData();
-}
-
-export function activeGameId() {
-  return getActiveGameId();
+  return db.data;
 }
 
 export async function persistAndBroadcast(sections = null) {
   await db.write();
-  if (sections) broadcastPatch(sections);
-  else broadcastState();
-}
-
-export function broadcastOnly(sections = null) {
   if (sections) broadcastPatch(sections);
   else broadcastState();
 }
@@ -76,18 +68,3 @@ export function scheduleWrite({ broadcast = true, sections = null } = {}) {
 
   return pendingWrite;
 }
-
-export async function mutateGameState(mutator, { broadcast = true, sections = null, write = true, immediate = true } = {}) {
-  const gameData = getActiveGameData();
-  const result = await mutator(gameData);
-  if (write) {
-    if (immediate) await db.write();
-    else scheduleWrite({ broadcast, sections });
-  }
-  if (broadcast && immediate) {
-    if (sections) broadcastPatch(sections);
-    else broadcastState();
-  }
-  return result ?? gameData;
-}
-

@@ -1,38 +1,94 @@
-import { mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
+import { existsSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Low } from "lowdb";
 import { JSONFile } from "lowdb/node";
-import { DEFAULT_GAME_ID, isValidGameId, listGames } from "./games.js";
-import { DATA_DIR, DB_FILE, getCardsDir, ensureCardsRoot } from "./paths.js";
-import { getGameAdapter } from "./gameAdapters/index.js";
+import { CARDS_DIR, DATA_DIR, DB_FILE, ensureDataDirs } from "./paths.js";
 
-function makePlayer(id, gameId = DEFAULT_GAME_ID) {
-  return getGameAdapter(gameId).makePlayer(id);
-}
+// ---------------------------------------------------------------------------
+// Deck shape (Riftbound)
+// ---------------------------------------------------------------------------
 
-function makeGame() {
+function makePlayer(id) {
   return {
-    battlefield: { p1: null, p2: null },
-    champion: { p1: null, p2: null },
-    score: { p1: 0, p2: 0 },
-    pokemon: {
-      p1: { active: null, bench: [] },
-      p2: { active: null, bench: [] },
+    id,
+    pseudo: "",
+    deck: {
+      legend: null,
+      champions: [],
+      battlefields: [],
+      maindeck: [],
+      runes: [],
+      sideboard: [],
     },
   };
 }
 
-const FORMATS = {
+function ensurePlayerDeck(player) {
+  player.deck ||= {};
+  player.deck.legend ??= null;
+  player.deck.champions ||= [];
+  player.deck.battlefields ||= [];
+  player.deck.maindeck ||= [];
+  player.deck.runes ||= [];
+  player.deck.sideboard ||= [];
+  return player;
+}
+
+const normEntries = (arr) =>
+  (Array.isArray(arr) ? arr : [])
+    .map((e) => (typeof e === "string" ? { id: e, quantity: 1 } : e))
+    .filter((e) => e && e.id)
+    .map((e) => ({ id: e.id, quantity: Number(e.quantity) || 1 }));
+
+const normIds = (arr) =>
+  (Array.isArray(arr) ? arr : []).map((e) => (typeof e === "string" ? e : e?.id)).filter(Boolean);
+
+/** Normalize a deck payload from the control panel / API into the stored shape. */
+export function normalizeDeck(input = {}) {
+  return {
+    legend: input.legend || null,
+    champions: normIds(input.champions),
+    battlefields: normEntries(input.battlefields),
+    maindeck: normEntries(input.maindeck),
+    runes: normEntries(input.runes),
+    sideboard: normEntries(input.sideboard),
+  };
+}
+
+/** Every card id referenced by a deck (for image caching). */
+export function deckCardIds(deck = {}) {
+  return [
+    deck.legend,
+    ...(deck.champions || []),
+    ...(deck.battlefields || []).map((e) => e.id),
+    ...(deck.maindeck || []).map((e) => e.id),
+    ...(deck.runes || []).map((e) => e.id),
+    ...(deck.sideboard || []).map((e) => e.id),
+  ].filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// Match / display / layout defaults
+// ---------------------------------------------------------------------------
+
+export function makeGame() {
+  return {
+    battlefield: { p1: null, p2: null },
+    champion: { p1: null, p2: null },
+    score: { p1: 0, p2: 0 },
+  };
+}
+
+export const FORMATS = {
   bo1: { games: 1, win: 1 },
   bo3: { games: 3, win: 2 },
   bo5: { games: 5, win: 3 },
 };
 
 /** Card reveal animations for on-demand display (overlay CSS). */
-const CARD_ANIMATIONS = ["none", "fade", "slide", "pop", "flip", "glow", "impact"];
-const POKEMON_MAX_PRIZES = 6;
+export const CARD_ANIMATIONS = ["none", "fade", "slide", "pop", "flip", "glow", "impact"];
 
-function defaultDisplay() {
+export function defaultDisplay() {
   return {
     mode: "persistent",
     cards: { p1: null, p2: null },
@@ -41,7 +97,7 @@ function defaultDisplay() {
   };
 }
 
-function defaultMatch(format = "bo3") {
+export function defaultMatch(format = "bo3") {
   const n = (FORMATS[format] || FORMATS.bo3).games;
   return {
     format: FORMATS[format] ? format : "bo3",
@@ -51,8 +107,6 @@ function defaultMatch(format = "bo3") {
   };
 }
 
-const POKEMON_LAYOUT_VERSION = 2;
-
 const CARD_PORTRAIT = 744 / 1039;
 const CARD_LANDSCAPE = 1039 / 744;
 const CANVAS_RATIO = 16 / 9;
@@ -61,6 +115,48 @@ function slotHeight(widthPct, ratio) {
   return Math.round(((widthPct * CANVAS_RATIO) / ratio) * 10) / 10;
 }
 
+export function defaultLayout() {
+  return {
+    "p1.pseudo": { x: 2, y: 10.2, width: 11, height: 5, visible: true, fontSize: 3.2, align: "center", color: "#ffffff" },
+    "p2.pseudo": { x: 86.83477740719258, y: 10.257199020366073, width: 11, height: 5, visible: true, fontSize: 3.2, align: "center", color: "#ffffff" },
+    score: { x: 42, y: 3, width: 16, height: 7, visible: false, fontSize: 5, align: "center", color: "#ffffff" },
+    playArea: { x: 18.265099182241737, y: 8.169919287666701, width: 63.55587296983759, height: 91.8300807123333, visible: true },
+    "match.tally": {
+      x: 18.265566995359634,
+      y: 88.70675431812323,
+      width: 63.47521026682134,
+      height: 11.293245681876773,
+      visible: true,
+      fontSize: 2.2,
+      align: "center",
+      color: "#8fa8cc",
+    },
+    "p1.legend": { x: 2, y: 16, width: 11, height: 27.3, visible: true },
+    "p2.legend": { x: 86.56020648077944, y: 15.781077880123147, width: 11, height: 27.3, visible: true },
+    "p1.battlefield": { x: 2, y: 44.3, width: 14, height: 17.8, visible: true },
+    "p2.battlefield": { x: 84, y: 44.3, width: 14, height: 17.8, visible: true },
+    "p1.card": { x: 2, y: 63.1, width: 11, height: 27.3, visible: true },
+    "p2.card": { x: 87.01404799883991, y: 63.1, width: 11, height: 27.3, visible: true },
+    "p1.champion": { x: 2, y: 86.2, width: 16, height: 5, visible: false, fontSize: 2.4, align: "center", color: "#dce6f5" },
+    "p2.champion": { x: 82, y: 62.2, width: 16, height: 5, visible: false, fontSize: 2.4, align: "center", color: "#dce6f5" },
+  };
+}
+
+export function defaultData() {
+  return {
+    cardsCache: {},
+    players: [makePlayer("p1"), makePlayer("p2")],
+    match: defaultMatch(),
+    display: defaultDisplay(),
+    layout: defaultLayout(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Migrations (pure, testable)
+// ---------------------------------------------------------------------------
+
+/** Split the pre-v1 `legendGroup` block into `pseudo` + `legend` slots. */
 function splitLegendGroups(layout) {
   const pseudoBand = 5;
   for (const side of ["p1", "p2"]) {
@@ -90,168 +186,76 @@ function splitLegendGroups(layout) {
   }
 }
 
-function defaultLayout() {
-  return {
-    "p1.pseudo": { x: 2, y: 10.2, width: 11, height: 5, visible: true, fontSize: 3.2, align: "center", color: "#ffffff" },
-    "p2.pseudo": { x: 86.83477740719258, y: 10.257199020366073, width: 11, height: 5, visible: true, fontSize: 3.2, align: "center", color: "#ffffff" },
-    score: { x: 42, y: 3, width: 16, height: 7, visible: false, fontSize: 5, align: "center", color: "#ffffff" },
-    playArea: { x: 18.265099182241737, y: 8.169919287666701, width: 63.55587296983759, height: 91.8300807123333, visible: true },
-    "match.tally": {
-      x: 18.265566995359634,
-      y: 88.70675431812323,
-      width: 63.47521026682134,
-      height: 11.293245681876773,
-      visible: true,
-      fontSize: 2.2,
-      align: "center",
-      color: "#8fa8cc",
-    },
-    "p1.legend": { x: 2, y: 16, width: 11, height: 27.3, visible: true },
-    "p2.legend": { x: 86.56020648077944, y: 15.781077880123147, width: 11, height: 27.3, visible: true },
-    "p1.battlefield": { x: 2, y: 44.3, width: 14, height: 17.8, visible: true },
-    "p2.battlefield": { x: 84, y: 44.3, width: 14, height: 17.8, visible: true },
-    "p1.card": { x: 2, y: 63.1, width: 11, height: 27.3, visible: true },
-    "p2.card": { x: 87.01404799883991, y: 63.1, width: 11, height: 27.3, visible: true },
-    "p1.champion": { x: 2, y: 86.2, width: 16, height: 5, visible: false, fontSize: 2.4, align: "center", color: "#dce6f5" },
-    "p2.champion": { x: 82, y: 62.2, width: 16, height: 5, visible: false, fontSize: 2.4, align: "center", color: "#dce6f5" },
-  };
+/** `/cards/<game>/<file>` (v2.2 multi-game layout) → `/cards/<file>`. */
+function flattenCardPath(path) {
+  if (!path || typeof path !== "string") return path;
+  const m = path.match(/^\/cards\/[^/]+\/([^/]+)$/);
+  return m ? `/cards/${m[1]}` : path;
 }
 
-function defaultPokemonLayout() {
-  const cardW = 10;
-  const cardH = slotHeight(cardW, CARD_PORTRAIT);
-  return {
-    "p1.pseudo": { x: 2, y: 2, width: 14, height: 5, visible: true, fontSize: 3.4, align: "center", color: "#ffffff" },
-    "p2.pseudo": { x: 84, y: 2, width: 14, height: 5, visible: true, fontSize: 3.4, align: "center", color: "#ffffff" },
-    score: { x: 42, y: 3, width: 16, height: 7, visible: false, fontSize: 5, align: "center", color: "#ffffff" },
-    playArea: { x: 16, y: 10, width: 68, height: 88, visible: true },
-    "match.tally": {
-      x: 16,
-      y: 88,
-      width: 68,
-      height: 10,
-      visible: true,
-      fontSize: 2.2,
-      align: "center",
-      color: "#e8e8e8",
-    },
-    "p1.card": { x: 2, y: 8, width: cardW, height: cardH, visible: true },
-    "p2.card": { x: 88, y: 8, width: cardW, height: cardH, visible: true },
-    "p1.legend": { x: 2, y: 16, width: 11, height: 27.3, visible: false },
-    "p2.legend": { x: 86, y: 16, width: 11, height: 27.3, visible: false },
-    "p1.battlefield": { x: 2, y: 44.3, width: 14, height: 17.8, visible: false },
-    "p2.battlefield": { x: 84, y: 44.3, width: 14, height: 17.8, visible: false },
-    "p1.champion": { x: 2, y: 86.2, width: 16, height: 5, visible: false, fontSize: 2.4, align: "center", color: "#cccccc" },
-    "p2.champion": { x: 82, y: 86.2, width: 16, height: 5, visible: false, fontSize: 2.4, align: "center", color: "#cccccc" },
-  };
-}
+/**
+ * Bring any stored shape to the current flat Riftbound-only schema.
+ *   - v2.2 multi-game: { session: { activeGame }, games: { riftbound, pokemon } }
+ *   - v2.1 and earlier: flat { cardsCache, players, match, display, layout }
+ * Returns { data, changed }.
+ */
+export function migrateData(raw) {
+  let changed = false;
+  let data = raw && typeof raw === "object" ? raw : null;
+  if (!data) return { data: defaultData(), changed: true };
 
-export function defaultLayoutForGame(gameId = DEFAULT_GAME_ID) {
-  return gameId === "pokemon" ? defaultPokemonLayout() : defaultLayout();
-}
-
-export function defaultGameData(gameId = DEFAULT_GAME_ID) {
-  return {
-    cardsCache: {},
-    players: [makePlayer("p1", gameId), makePlayer("p2", gameId)],
-    match: defaultMatch(),
-    display: defaultDisplay(),
-    layout: defaultLayoutForGame(gameId),
-  };
-}
-
-function defaultData() {
-  const games = {};
-  for (const game of listGames()) {
-    games[game.id] = defaultGameData(game.id);
-  }
-  return {
-    session: { activeGame: DEFAULT_GAME_ID },
-    games,
-  };
-}
-
-function migrateLegacyTopLevel(data) {
-  if (!data.players) return data;
-
-  const legacy = {
-    cardsCache: data.cardsCache || {},
-    players: data.players,
-    match: data.match,
-    display: data.display,
-    layout: data.layout,
-  };
-
-  const games = {};
-  for (const game of listGames()) {
-    games[game.id] = game.id === DEFAULT_GAME_ID ? legacy : defaultGameData(game.id);
+  if (data.games && typeof data.games === "object") {
+    // Always take the Riftbound slice, never the "active" game.
+    const rb = data.games.riftbound && typeof data.games.riftbound === "object" ? data.games.riftbound : {};
+    data = {
+      cardsCache: rb.cardsCache || {},
+      players: rb.players,
+      match: rb.match,
+      display: rb.display,
+      layout: rb.layout,
+    };
+    changed = true;
   }
 
-  return {
-    session: { activeGame: DEFAULT_GAME_ID },
-    games,
-  };
-}
-
-function migrateFlatCardFiles() {
-  const root = join(DATA_DIR, "cards");
-  mkdirSync(root, { recursive: true });
-  const dest = getCardsDir(DEFAULT_GAME_ID);
-  mkdirSync(dest, { recursive: true });
-
-  let entries;
-  try {
-    entries = readdirSync(root);
-  } catch {
-    return;
-  }
-
-  for (const name of entries) {
-    const src = join(root, name);
-    if (name === DEFAULT_GAME_ID || name === "pokemon") continue;
-    try {
-      if (!statSync(src).isFile()) continue;
-      renameSync(src, join(dest, name));
-    } catch {
-      /* ignore */
+  for (const key of ["session", "games", "layoutVersion"]) {
+    if (key in data) {
+      delete data[key];
+      changed = true;
     }
   }
-}
 
-function prefixCardPath(path, gameId) {
-  if (!path || typeof path !== "string") return path;
-  if (path.startsWith(`/cards/${gameId}/`)) return path;
-  if (path.startsWith("/cards/")) {
-    const file = path.slice("/cards/".length);
-    if (!file.includes("/")) return `/cards/${gameId}/${file}`;
-  }
-  return path;
-}
-
-function migrateGameCardPaths(gameData, gameId) {
-  for (const entry of Object.values(gameData.cardsCache || {})) {
-    if (entry.imageLocal) entry.imageLocal = prefixCardPath(entry.imageLocal, gameId);
-    if (entry.thumbLocal) entry.thumbLocal = prefixCardPath(entry.thumbLocal, gameId);
-  }
-}
-
-function backfillGameData(gameData, gameId = DEFAULT_GAME_ID) {
-  if (gameId === "pokemon" && (gameData.layoutVersion ?? 0) < POKEMON_LAYOUT_VERSION) {
-    gameData.layout = defaultPokemonLayout();
-    gameData.layoutVersion = POKEMON_LAYOUT_VERSION;
-  }
-
-  const defaults = defaultGameData(gameId);
+  const defaults = defaultData();
   for (const key of Object.keys(defaults)) {
-    if (gameData[key] === undefined) gameData[key] = defaults[key];
+    if (data[key] === undefined || data[key] === null) {
+      data[key] = defaults[key];
+      changed = true;
+    }
   }
 
-  splitLegendGroups(gameData.layout);
+  for (const entry of Object.values(data.cardsCache)) {
+    if (!entry || typeof entry !== "object") continue;
+    for (const field of ["imageLocal", "thumbLocal"]) {
+      const next = flattenCardPath(entry[field]);
+      if (next !== entry[field]) {
+        entry[field] = next;
+        changed = true;
+      }
+    }
+  }
+
+  if (!Array.isArray(data.players) || data.players.length !== 2) {
+    data.players = [makePlayer("p1"), makePlayer("p2")];
+    changed = true;
+  }
+  for (const player of data.players) ensurePlayerDeck(player);
+
+  // Layout
+  const beforeLayout = JSON.stringify(data.layout);
+  splitLegendGroups(data.layout);
   for (const [slot, value] of Object.entries(defaults.layout)) {
-    gameData.layout[slot] ||= value;
+    data.layout[slot] ||= value;
   }
-
-  for (const [slot, cfg] of Object.entries(gameData.layout)) {
+  for (const [slot, cfg] of Object.entries(data.layout)) {
     const ratio =
       slot.endsWith(".legend") || slot.endsWith(".card")
         ? CARD_PORTRAIT
@@ -260,20 +264,35 @@ function backfillGameData(gameData, gameId = DEFAULT_GAME_ID) {
           : null;
     if (ratio && cfg?.width) cfg.height = slotHeight(cfg.width, ratio);
   }
-  delete gameData.layout["p1.legendGroup"];
-  delete gameData.layout["p2.legendGroup"];
+  delete data.layout["p1.legendGroup"];
+  delete data.layout["p2.legendGroup"];
+  if (JSON.stringify(data.layout) !== beforeLayout) changed = true;
 
-  const match = gameData.match;
+  // Match
+  const match = data.match;
+  const beforeMatch = JSON.stringify(match);
   match.format = FORMATS[match.format] ? match.format : "bo3";
+  match.score ||= { p1: 0, p2: 0 };
+  if (typeof match.currentGame !== "number") match.currentGame = 0;
+  match.games = Array.isArray(match.games) ? match.games : [];
   const need = FORMATS[match.format].games;
   while (match.games.length < need) match.games.push(makeGame());
   if (match.games.length > need) match.games.length = need;
   if (match.currentGame > need - 1) match.currentGame = need - 1;
-
-  const display = gameData.display;
-  if (!display.cards || typeof display.cards !== "object") {
-    display.cards = { p1: null, p2: null };
+  for (const g of match.games) {
+    if (!g.battlefield || typeof g.battlefield !== "object") g.battlefield = { p1: null, p2: null };
+    if (!g.champion || typeof g.champion !== "object") g.champion = { p1: null, p2: null };
+    if (!g.score || typeof g.score !== "object") g.score = { p1: 0, p2: 0 };
+    if (typeof g.score.p1 !== "number") g.score.p1 = 0;
+    if (typeof g.score.p2 !== "number") g.score.p2 = 0;
+    delete g.pokemon;
   }
+  if (JSON.stringify(match) !== beforeMatch) changed = true;
+
+  // Display
+  const display = data.display;
+  const beforeDisplay = JSON.stringify(display);
+  if (!display.cards || typeof display.cards !== "object") display.cards = { p1: null, p2: null };
   for (const pid of ["p1", "p2"]) {
     if (display.cards[pid] === undefined) display.cards[pid] = null;
   }
@@ -282,107 +301,59 @@ function backfillGameData(gameData, gameId = DEFAULT_GAME_ID) {
     delete display.currentCardId;
   }
   if (!CARD_ANIMATIONS.includes(display.cardAnimation)) display.cardAnimation = "pop";
-  if (!display.cardReveal || typeof display.cardReveal !== "object") {
-    display.cardReveal = { p1: 0, p2: 0 };
-  }
+  if (!display.cardReveal || typeof display.cardReveal !== "object") display.cardReveal = { p1: 0, p2: 0 };
   for (const pid of ["p1", "p2"]) {
     if (typeof display.cardReveal[pid] !== "number") display.cardReveal[pid] = 0;
   }
+  if (JSON.stringify(display) !== beforeDisplay) changed = true;
 
-  for (const g of match.games) {
-    if (!g.score || typeof g.score !== "object") g.score = { p1: 0, p2: 0 };
-    if (typeof g.score.p1 !== "number") g.score.p1 = 0;
-    if (typeof g.score.p2 !== "number") g.score.p2 = 0;
-    if (!g.pokemon || typeof g.pokemon !== "object") g.pokemon = makeGame().pokemon;
-    for (const pid of ["p1", "p2"]) {
-      const side = g.pokemon[pid];
-      if (!side || typeof side !== "object") {
-        g.pokemon[pid] = { active: null, bench: [] };
-      } else {
-        side.active ||= null;
-        side.bench = Array.isArray(side.bench) ? side.bench.filter(Boolean).slice(0, 5) : [];
-      }
-      if (gameId === "pokemon") {
-        g.score[pid] = Math.max(0, Math.min(POKEMON_MAX_PRIZES, g.score[pid]));
-      }
-    }
-  }
-
-  if (gameId === "pokemon") {
-    for (const player of gameData.players || []) {
-      getGameAdapter(gameId).ensurePlayerDeck(player);
-    }
-  } else {
-    for (const player of gameData.players || []) {
-      getGameAdapter(gameId).ensurePlayerDeck(player);
-    }
-  }
+  return { data, changed };
 }
 
-ensureCardsRoot();
-mkdirSync(DATA_DIR, { recursive: true });
+/**
+ * Move images out of the v2.2 per-game folders back into `data/cards/`, and
+ * remove Pokémon leftovers. Safe to run on every start (no-op once done).
+ */
+function migrateCardFiles() {
+  const legacy = join(CARDS_DIR, "riftbound");
+  if (existsSync(legacy)) {
+    let entries = [];
+    try {
+      entries = readdirSync(legacy);
+    } catch {
+      entries = [];
+    }
+    for (const name of entries) {
+      const src = join(legacy, name);
+      const dest = join(CARDS_DIR, name);
+      try {
+        if (!statSync(src).isFile()) continue;
+        if (existsSync(dest)) rmSync(src, { force: true });
+        else renameSync(src, dest);
+      } catch {
+        /* ignore and keep going */
+      }
+    }
+    rmSync(legacy, { recursive: true, force: true });
+  }
+  rmSync(join(CARDS_DIR, "pokemon"), { recursive: true, force: true });
+  rmSync(join(DATA_DIR, "pokemon-set-index.json"), { force: true });
+}
+
+// ---------------------------------------------------------------------------
+// Database instance
+// ---------------------------------------------------------------------------
+
+ensureDataDirs();
 
 const adapter = new JSONFile(DB_FILE);
 export const db = new Low(adapter, defaultData());
 
-export function getActiveGameId() {
-  const id = db.data?.session?.activeGame;
-  return isValidGameId(id) ? id : DEFAULT_GAME_ID;
-}
-
-export function getActiveGameData() {
-  const id = getActiveGameId();
-  if (!db.data.games) db.data.games = {};
-  if (!db.data.games[id]) db.data.games[id] = defaultGameData(id);
-  return db.data.games[id];
-}
-
-export async function setActiveGame(gameId) {
-  if (!isValidGameId(gameId)) {
-    throw Object.assign(new Error("invalid game"), { status: 400 });
-  }
-  db.data.session ||= { activeGame: DEFAULT_GAME_ID };
-  db.data.session.activeGame = gameId;
-  db.data.games ||= {};
-  if (!db.data.games[gameId]) db.data.games[gameId] = defaultGameData(gameId);
-  mkdirSync(getCardsDir(gameId), { recursive: true });
-  await db.write();
-  return db.data.games[gameId];
-}
-
 export async function initDb() {
   await db.read();
-  db.data ||= defaultData();
-
-  if (db.data.players) {
-    db.data = migrateLegacyTopLevel(db.data);
-  }
-
-  db.data.session ||= { activeGame: DEFAULT_GAME_ID };
-  if (!isValidGameId(db.data.session.activeGame)) {
-    db.data.session.activeGame = DEFAULT_GAME_ID;
-  }
-
-  db.data.games ||= {};
-  for (const game of listGames()) {
-    if (!db.data.games[game.id]) db.data.games[game.id] = defaultGameData(game.id);
-    migrateGameCardPaths(db.data.games[game.id], game.id);
-    backfillGameData(db.data.games[game.id], game.id);
-    mkdirSync(getCardsDir(game.id), { recursive: true });
-  }
-
-  migrateFlatCardFiles();
-  await db.write();
+  const { data, changed } = migrateData(db.data);
+  db.data = data;
+  migrateCardFiles();
+  if (changed || !existsSync(DB_FILE)) await db.write();
   return db;
 }
-
-export {
-  defaultLayout,
-  defaultPokemonLayout,
-  defaultMatch,
-  makePlayer,
-  FORMATS,
-  CARD_ANIMATIONS,
-  defaultDisplay,
-  POKEMON_MAX_PRIZES,
-};

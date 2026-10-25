@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { getActiveGameId } from "./db.js";
-import { DATA_DIR, getCardsDir } from "./paths.js";
+import { CARDS_DIR } from "./paths.js";
 
 const SD96_SIZE = 96;
 
@@ -85,18 +84,12 @@ function assertRgbBuffer(buffer, size, label) {
 
 async function localCardPath(thumbLocal) {
   if (!thumbLocal) return null;
-  const nested = thumbLocal.match(/^\/cards\/([^/]+)\/(.+)$/);
-  if (nested) {
-    const abs = join(DATA_DIR, "cards", nested[1], nested[2]);
-    return existsSync(abs) ? abs : null;
-  }
-  const file = basename(thumbLocal);
-  const abs = join(getCardsDir(getActiveGameId()), file);
+  const abs = join(CARDS_DIR, basename(thumbLocal));
   return existsSync(abs) ? abs : null;
 }
 
 function sd96Path(cardId) {
-  return join(getCardsDir(getActiveGameId()), `${cardId}-sd96.rgb`);
+  return join(CARDS_DIR, `${cardId}-sd96.rgb`);
 }
 
 function readSd96Art(cardId) {

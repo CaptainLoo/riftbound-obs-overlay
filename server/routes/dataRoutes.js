@@ -1,9 +1,7 @@
 import { Router } from "express";
-import { getActiveGameId } from "../db.js";
-import { getGame } from "../games.js";
+import { db } from "../db.js";
 import { displayCardEntries } from "../deckCards.js";
 import { buildState } from "../hub.js";
-import { activeGameData } from "../services/stateService.js";
 
 export const dataRoutes = Router();
 
@@ -12,20 +10,15 @@ dataRoutes.get("/state", (_req, res) => {
 });
 
 dataRoutes.get("/data", (_req, res) => {
-  const gameData = activeGameData();
-  const activeGame = getActiveGameId();
-  const game = getGame(activeGame);
+  const { players, match, display, layout, cardsCache } = db.data;
   res.json({
-    activeGame,
-    gameName: game?.name || activeGame,
-    players: gameData.players.map((p) => ({
+    players: players.map((p) => ({
       ...p,
-      displayCards: displayCardEntries(p.deck, gameData.cardsCache, activeGame),
+      displayCards: displayCardEntries(p.deck, cardsCache),
     })),
-    match: gameData.match,
-    display: gameData.display,
-    layout: gameData.layout,
-    cardsCache: gameData.cardsCache,
+    match,
+    display,
+    layout,
+    cardsCache,
   });
 });
-

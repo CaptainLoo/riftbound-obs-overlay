@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /** True when running inside a pkg binary. */
-export const IS_PKG = Boolean(process.pkg);
+const IS_PKG = Boolean(process.pkg);
 /** True when launched via the portable Windows `Start Riftbound.bat`. */
 export const IS_PORTABLE = process.env.RIFTBOUND_PORTABLE === "1";
 /** True when launched via the Inno Setup installer shortcut. */
@@ -68,22 +68,21 @@ export function getContentRoot() {
   return DEV_ROOT;
 }
 
-function resolvePublicDir(root) {
-  return join(root, "public");
+function resolveDataDir() {
+  if (process.env.RIFTBOUND_DATA_DIR) {
+    return process.env.RIFTBOUND_DATA_DIR.replace(/[\\/]+$/, "");
+  }
+  return IS_RELEASE ? userDataDir() : join(DEV_ROOT, "data");
 }
 
 export const ROOT_DIR = getContentRoot();
-export const PUBLIC_DIR = resolvePublicDir(ROOT_DIR);
-export const DATA_DIR = IS_RELEASE ? userDataDir() : join(DEV_ROOT, "data");
-/** @deprecated Prefer getCardsDir(gameId) for per-game card storage. */
+export const PUBLIC_DIR = join(ROOT_DIR, "public");
+/** User data (db.json, cached card images, update files). `RIFTBOUND_DATA_DIR` overrides it (tests). */
+export const DATA_DIR = resolveDataDir();
+/** Cached card images, served at `/cards/<file>`. */
 export const CARDS_DIR = join(DATA_DIR, "cards");
 export const DB_FILE = join(DATA_DIR, "db.json");
 
-export function ensureCardsRoot() {
-  mkdirSync(join(DATA_DIR, "cards"), { recursive: true });
-}
-
-/** Per-game card image directory (e.g. data/cards/riftbound). */
-export function getCardsDir(gameId = "riftbound") {
-  return join(DATA_DIR, "cards", gameId);
+export function ensureDataDirs() {
+  mkdirSync(CARDS_DIR, { recursive: true });
 }

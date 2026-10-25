@@ -5,7 +5,7 @@ import { mergeStatePatch } from "../public/shared/ws.js";
 
 test("mergeStatePatch replaces only patched top-level sections", () => {
   const state = {
-    meta: { gameId: "riftbound" },
+    players: [],
     match: { currentGame: 0 },
     layout: { playArea: { x: 1 } },
   };
@@ -13,7 +13,7 @@ test("mergeStatePatch replaces only patched top-level sections", () => {
     layout: { playArea: { x: 2 } },
   });
 
-  assert.equal(next.meta, state.meta);
+  assert.equal(next.players, state.players);
   assert.equal(next.match, state.match);
   assert.deepEqual(next.layout, { playArea: { x: 2 } });
 });

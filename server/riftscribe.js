@@ -1,8 +1,8 @@
 import { writeFile, access } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, extname } from "node:path";
-import { getActiveGameData, getActiveGameId } from "./db.js";
-import { getCardsDir } from "./paths.js";
+import { join, extname, basename } from "node:path";
+import { db } from "./db.js";
+import { CARDS_DIR } from "./paths.js";
 
 const API_BASE = "https://riftscribe.gg/api";
 
@@ -27,10 +27,6 @@ export async function fetchCardDetail(cardId) {
   return fetchJson(`${API_BASE}/cards/${encodeURIComponent(cardId)}`);
 }
 
-function cardsDir() {
-  return getCardsDir(getActiveGameId());
-}
-
 function fileExists(path) {
   return access(path).then(
     () => true,
@@ -42,51 +38,49 @@ async function downloadImage(url, cardId, suffix) {
   if (!url) return null;
   const ext = extname(new URL(url).pathname) || ".png";
   const fileName = `${cardId}${suffix}${ext}`;
-  const dir = cardsDir();
-  const dest = join(dir, fileName);
+  const dest = join(CARDS_DIR, fileName);
   if (!(await fileExists(dest))) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Image download failed (${res.status}) for ${url}`);
     const buf = Buffer.from(await res.arrayBuffer());
     await writeFile(dest, buf);
   }
-  const gameId = getActiveGameId();
-  return `/cards/${gameId}/${fileName}`;
+  return `/cards/${fileName}`;
+}
+
+/** Absolute path of a cached `/cards/<file>` URL, or null when the file is missing. */
+function localCardFile(localPath) {
+  if (!localPath) return null;
+  const abs = join(CARDS_DIR, basename(localPath));
+  return existsSync(abs) ? abs : null;
+}
+
+function localAssetExists(localPath) {
+  return Boolean(localCardFile(localPath));
+}
+
+/** Re-download a card when cache metadata exists but files are missing on disk. */
+export async function repairCardAsset(cardId) {
+  const entry = db.data.cardsCache[cardId];
+  if (entry) {
+    if (localAssetExists(entry.thumbLocal) || localAssetExists(entry.imageLocal)) return entry;
+    delete db.data.cardsCache[cardId];
+    await db.write();
+  }
+  return cacheCard(cardId);
 }
 
 /**
  * Ensure a card is present in the local cache: fetches metadata and downloads
  * the full image + a large thumbnail. Returns the cached entry.
  */
-function localAssetExists(localPath) {
-  if (!localPath) return false;
-  const file = localPath.replace(/^\/cards\/[^/]+\//, "").replace(/^\/cards\//, "");
-  return existsSync(join(cardsDir(), file));
-}
-
-/** Re-download a card when cache metadata exists but files are missing on disk. */
-export async function repairCardAsset(cardId) {
-  const gameData = getActiveGameData();
-  const entry = gameData.cardsCache[cardId];
-  if (entry) {
-    const thumbOk = localAssetExists(entry.thumbLocal);
-    const imageOk = localAssetExists(entry.imageLocal);
-    if (thumbOk || imageOk) return entry;
-    delete gameData.cardsCache[cardId];
-    const { db } = await import("./db.js");
-    await db.write();
-  }
-  return cacheCard(cardId);
-}
-
 export async function cacheCard(cardId) {
-  const gameData = getActiveGameData();
-  const existing = gameData.cardsCache[cardId];
+  const existing = db.data.cardsCache[cardId];
   if (existing) {
     if (localAssetExists(existing.thumbLocal) || localAssetExists(existing.imageLocal)) {
       return existing;
     }
-    delete gameData.cardsCache[cardId];
+    delete db.data.cardsCache[cardId];
   }
 
   const detail = await fetchCardDetail(cardId);
@@ -108,18 +102,13 @@ export async function cacheCard(cardId) {
     thumbLocal: thumbLocal || imageLocal,
   };
 
-  gameData.cardsCache[id] = entry;
-  const { db } = await import("./db.js");
+  db.data.cardsCache[id] = entry;
   await db.write();
   try {
     const { bakeStreamDeckThumb } = await import("./streamdeckImages.js");
-    await bakeStreamDeckThumb(id, gameData.cardsCache);
+    await bakeStreamDeckThumb(id, db.data.cardsCache);
   } catch (err) {
     console.warn(`[cache] sd96 bake ${id}: ${err.message}`);
   }
   return entry;
-}
-
-export function getCachedCard(cardId) {
-  return getActiveGameData().cardsCache[cardId] || null;
 }

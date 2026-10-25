@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getActiveGameId } from "../db.js";
+import { db } from "../db.js";
 import { playerBattlefields, playerDisplayCards } from "../deckCards.js";
 import { DEVICES } from "../streamdeckLayout.js";
 import {
@@ -7,29 +7,25 @@ import {
   queueStreamDeckRefreshImages,
   reconnectStreamDeckSafe,
 } from "../streamdeckApi.js";
-import { activeGameData } from "../services/stateService.js";
 
 export const streamdeckRoutes = Router();
 
 streamdeckRoutes.get("/streamdeck", async (_req, res) => {
   const hid = await getStreamDeckStatusSafe();
-  const gameData = activeGameData();
-  const gameId = getActiveGameId();
-  const showing = gameData.display?.cards || { p1: null, p2: null };
-  const match = gameData.match;
-  const players = gameData.players.map((p) => {
-    const info = playerDisplayCards(p, gameData.cardsCache, gameId);
-    const battlefields = playerBattlefields(p, gameData.cardsCache, gameId);
+  const { players, match, display, cardsCache } = db.data;
+  const showing = display?.cards || { p1: null, p2: null };
+  const playerInfo = players.map((p) => {
+    const info = playerDisplayCards(p, cardsCache);
     return {
       ...info,
       showing: showing[p.id] || null,
-      battlefields,
+      battlefields: playerBattlefields(p, cardsCache),
       cardCount: info.cards.length,
     };
   });
   res.json({
     ...hid,
-    players,
+    players: playerInfo,
     showing,
     match: {
       currentGame: match.currentGame,
@@ -38,7 +34,7 @@ streamdeckRoutes.get("/streamdeck", async (_req, res) => {
     devices: DEVICES,
     hint: hid.connected
       ? "Stream Deck is controlled directly by Riftbound OBS — no Elgato app required."
-      : "Quit the Elgato Stream Deck app (system tray + end StreamDeck.exe in Task Manager), then click Reconnect.",
+      : "Quit the Elgato Stream Deck app completely, then click Reconnect.",
   });
 });
 
@@ -58,4 +54,3 @@ streamdeckRoutes.post("/streamdeck/refresh-images", async (_req, res) => {
   }
   res.json({ ok: true, queued: true });
 });
-

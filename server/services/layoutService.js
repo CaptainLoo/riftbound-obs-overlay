@@ -1,4 +1,4 @@
-import { defaultLayoutForGame, getActiveGameId } from "../db.js";
+import { defaultLayout } from "../db.js";
 import { activeGameData, persistAndBroadcast, scheduleBroadcast, scheduleWrite } from "./stateService.js";
 
 export function getLayout() {
@@ -7,7 +7,7 @@ export function getLayout() {
 
 export async function resetLayout() {
   const gameData = activeGameData();
-  gameData.layout = defaultLayoutForGame(getActiveGameId());
+  gameData.layout = defaultLayout();
   await persistAndBroadcast(["layout"]);
   return gameData.layout;
 }
@@ -17,7 +17,7 @@ export function updateLiveLayoutSlot(slot, props) {
   if (slot && props && gameData.layout[slot]) {
     gameData.layout[slot] = { ...gameData.layout[slot], ...props };
     scheduleBroadcast("layout");
-    scheduleWrite({ broadcast: false });
+    scheduleWrite({ broadcast: false }).catch(() => {});
   }
   return gameData.layout;
 }
@@ -34,4 +34,3 @@ export async function saveLayout({ slot, props, layout } = {}) {
   await persistAndBroadcast(["layout"]);
   return gameData.layout;
 }
-

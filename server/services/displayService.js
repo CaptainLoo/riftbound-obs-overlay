@@ -1,12 +1,11 @@
 import { CARD_ANIMATIONS } from "../db.js";
 import { PLAYER_IDS } from "../constants.js";
 import { resolveDisplayCard } from "../deckCards.js";
-import { getActiveGameId } from "../db.js";
 import { cacheMany } from "./cardCacheService.js";
 import { activeGameData, persistAndBroadcast } from "./stateService.js";
 import { findPlayer, validatePlayerId } from "./playerService.js";
 
-export function bumpCardReveal(player) {
+function bumpCardReveal(player) {
   const gameData = activeGameData();
   if (!gameData.display.cardReveal) gameData.display.cardReveal = { p1: 0, p2: 0 };
   gameData.display.cardReveal[player] = (gameData.display.cardReveal[player] || 0) + 1;
@@ -19,13 +18,9 @@ export async function setDisplayCard(player, cardId) {
   }
   if (cardId) await cacheMany([cardId]);
   if (!gameData.display.cards) gameData.display.cards = { p1: null, p2: null };
-  if (player) {
-    gameData.display.cards[player] = cardId;
-    if (cardId) bumpCardReveal(player);
-  } else {
-    gameData.display.cards.p1 = cardId;
-    if (cardId) bumpCardReveal("p1");
-  }
+  const target = player || "p1";
+  gameData.display.cards[target] = cardId;
+  if (cardId) bumpCardReveal(target);
   gameData.display.mode = "persistent";
   await persistAndBroadcast(["display"]);
   return gameData.display;
@@ -36,12 +31,7 @@ export function resolveDisplayCardRequest(player, { cardId, index, name }) {
   if (index === undefined && !name) return null;
   const p = findPlayer(player || "p1");
   if (!p) throw Object.assign(new Error("unknown player"), { status: 404 });
-  const resolved = resolveDisplayCard(
-    p.deck,
-    activeGameData().cardsCache,
-    { index, name },
-    getActiveGameId()
-  );
+  const resolved = resolveDisplayCard(p.deck, activeGameData().cardsCache, { index, name });
   if (!resolved) throw Object.assign(new Error("card not found"), { status: 404 });
   return resolved;
 }
@@ -86,4 +76,3 @@ export async function clearDisplay(player = null) {
   await persistAndBroadcast(["display"]);
   return gameData.display;
 }
-
