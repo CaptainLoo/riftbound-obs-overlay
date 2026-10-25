@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { db } from "./db.js";
 import { CARDS_DIR } from "./paths.js";
+import { markDirty } from "./persist.js";
 
 const API_BASE = "https://riftscribe.gg/api";
 
@@ -65,7 +66,7 @@ export async function repairCardAsset(cardId) {
   if (entry) {
     if (localAssetExists(entry.thumbLocal) || localAssetExists(entry.imageLocal)) return entry;
     delete db.data.cardsCache[cardId];
-    await db.write();
+    markDirty();
   }
   return cacheCard(cardId);
 }
@@ -103,7 +104,7 @@ export async function cacheCard(cardId) {
   };
 
   db.data.cardsCache[id] = entry;
-  await db.write();
+  markDirty();
   try {
     const { bakeStreamDeckThumb } = await import("./streamdeckImages.js");
     await bakeStreamDeckThumb(id, db.data.cardsCache);

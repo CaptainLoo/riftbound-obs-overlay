@@ -1,5 +1,5 @@
 import { defaultLayout } from "../db.js";
-import { activeGameData, persistAndBroadcast, scheduleBroadcast, scheduleWrite } from "./stateService.js";
+import { activeGameData, commit } from "./stateService.js";
 
 export function getLayout() {
   return activeGameData().layout;
@@ -8,7 +8,7 @@ export function getLayout() {
 export async function resetLayout() {
   const gameData = activeGameData();
   gameData.layout = defaultLayout();
-  await persistAndBroadcast(["layout"]);
+  commit(["layout"]);
   return gameData.layout;
 }
 
@@ -16,8 +16,7 @@ export function updateLiveLayoutSlot(slot, props) {
   const gameData = activeGameData();
   if (slot && props && gameData.layout[slot]) {
     gameData.layout[slot] = { ...gameData.layout[slot], ...props };
-    scheduleBroadcast("layout");
-    scheduleWrite({ broadcast: false }).catch(() => {});
+    commit(["layout"]);
   }
   return gameData.layout;
 }
@@ -31,6 +30,6 @@ export async function saveLayout({ slot, props, layout } = {}) {
   } else {
     throw Object.assign(new Error("provide either {layout} or {slot, props}"), { status: 400 });
   }
-  await persistAndBroadcast(["layout"]);
+  commit(["layout"]);
   return gameData.layout;
 }

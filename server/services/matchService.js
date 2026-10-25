@@ -1,7 +1,7 @@
 import { defaultDisplay, defaultMatch, FORMATS, makeGame } from "../db.js";
 import { PLAYER_IDS } from "../constants.js";
 import { cacheMany } from "./cardCacheService.js";
-import { activeGameData, persistAndBroadcast } from "./stateService.js";
+import { activeGameData, commit } from "./stateService.js";
 import { findPlayer, validatePlayerId } from "./playerService.js";
 
 function currentGame(match) {
@@ -12,7 +12,7 @@ export async function resetMatch() {
   const gameData = activeGameData();
   gameData.match = defaultMatch(gameData.match.format);
   gameData.display = defaultDisplay();
-  await persistAndBroadcast(["match", "game", "display"]);
+  commit(["match", "game", "display"]);
   return gameData.match;
 }
 
@@ -26,7 +26,7 @@ export async function setMatchFormat(format) {
   while (match.games.length < need) match.games.push(makeGame());
   if (match.games.length > need) match.games.length = need;
   if (match.currentGame > need - 1) match.currentGame = need - 1;
-  await persistAndBroadcast(["match", "game"]);
+  commit(["match", "game"]);
   return match;
 }
 
@@ -42,7 +42,7 @@ export async function winGame(player) {
     const played = match.score.p1 + match.score.p2;
     match.currentGame = Math.min(played, match.games.length - 1);
   }
-  await persistAndBroadcast(["match", "game"]);
+  commit(["match", "game"]);
   return match;
 }
 
@@ -59,7 +59,7 @@ export async function updateMatch({ score, currentGame: currentGameIndex } = {})
       if (typeof score.p2 === "number") game.score.p2 = Math.max(0, score.p2);
     }
   }
-  await persistAndBroadcast(["match", "game"]);
+  commit(["match", "game"]);
   return match;
 }
 
@@ -72,7 +72,7 @@ export async function setSelection({ gameIndex, player, slot, cardId }) {
   }
   if (cardId) await cacheMany([cardId]);
   game[slot][player] = cardId || null;
-  await persistAndBroadcast(["game", "players"]);
+  commit(["game", "players"]);
   return game;
 }
 
@@ -87,7 +87,7 @@ export async function hotBattlefield({ player, cardId }) {
   if (!game) throw Object.assign(new Error("invalid game"), { status: 400 });
   await cacheMany([cardId]);
   game.battlefield[player] = cardId;
-  await persistAndBroadcast(["game", "players"]);
+  commit(["game", "players"]);
   return { gameIndex, player, cardId, name: gameData.cardsCache[cardId]?.name || cardId, game };
 }
 
@@ -102,7 +102,7 @@ export async function hotScore({ player, op }) {
   if (!game.score) game.score = { p1: 0, p2: 0 };
   const delta = op === "inc" ? 1 : -1;
   game.score[player] = Math.max(0, (game.score[player] || 0) + delta);
-  await persistAndBroadcast(["game"]);
+  commit(["game"]);
   return {
     player,
     delta,

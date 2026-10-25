@@ -1,8 +1,6 @@
 import { Router } from "express";
-import { db } from "../db.js";
-import { broadcastState } from "../hub.js";
 import { previewDecklist, savePlayerDeck, searchCards } from "../services/deckService.js";
-import { requirePlayer } from "../services/playerService.js";
+import { setPseudo } from "../services/playerService.js";
 
 export const deckRoutes = Router();
 
@@ -14,13 +12,9 @@ deckRoutes.get("/cards/search", async (req, res) => {
   }
 });
 
-deckRoutes.post("/players/:id/pseudo", async (req, res) => {
+deckRoutes.post("/players/:id/pseudo", (req, res) => {
   try {
-    const player = requirePlayer(req.params.id);
-    player.pseudo = String(req.body?.pseudo ?? "");
-    await db.write();
-    broadcastState();
-    res.json({ ok: true, pseudo: player.pseudo });
+    res.json({ ok: true, pseudo: setPseudo(req.params.id, req.body?.pseudo) });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -42,4 +36,3 @@ deckRoutes.post("/players/:id/deck", async (req, res) => {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
-

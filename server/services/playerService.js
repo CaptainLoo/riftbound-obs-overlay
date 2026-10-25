@@ -1,5 +1,5 @@
 import { PLAYER_IDS } from "../constants.js";
-import { activeGameData } from "./stateService.js";
+import { activeGameData, commit } from "./stateService.js";
 
 export function validatePlayerId(player) {
   return PLAYER_IDS.includes(player);
@@ -17,3 +17,9 @@ export function requirePlayer(id) {
   return player;
 }
 
+export function setPseudo(id, pseudo) {
+  const player = requirePlayer(id);
+  player.pseudo = String(pseudo ?? "");
+  commit(["players"]);
+  return player.pseudo;
+}

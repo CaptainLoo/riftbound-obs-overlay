@@ -2,7 +2,7 @@ import { CARD_ANIMATIONS } from "../db.js";
 import { PLAYER_IDS } from "../constants.js";
 import { resolveDisplayCard } from "../deckCards.js";
 import { cacheMany } from "./cardCacheService.js";
-import { activeGameData, persistAndBroadcast } from "./stateService.js";
+import { activeGameData, commit } from "./stateService.js";
 import { findPlayer, validatePlayerId } from "./playerService.js";
 
 function bumpCardReveal(player) {
@@ -22,7 +22,7 @@ export async function setDisplayCard(player, cardId) {
   gameData.display.cards[target] = cardId;
   if (cardId) bumpCardReveal(target);
   gameData.display.mode = "persistent";
-  await persistAndBroadcast(["display"]);
+  commit(["display"]);
   return gameData.display;
 }
 
@@ -48,7 +48,7 @@ export async function setAnimation(animation) {
   for (const pid of PLAYER_IDS) {
     if (gameData.display.cards?.[pid]) bumpCardReveal(pid);
   }
-  await persistAndBroadcast(["display"]);
+  commit(["display"]);
   return gameData.display;
 }
 
@@ -59,7 +59,7 @@ export async function showMatchup() {
     gameData.display.cards.p1 = null;
     gameData.display.cards.p2 = null;
   }
-  await persistAndBroadcast(["display"]);
+  commit(["display"]);
   return gameData.display;
 }
 
@@ -73,6 +73,6 @@ export async function clearDisplay(player = null) {
     gameData.display.cards.p1 = null;
     gameData.display.cards.p2 = null;
   }
-  await persistAndBroadcast(["display"]);
+  commit(["display"]);
   return gameData.display;
 }

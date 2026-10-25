@@ -2,7 +2,7 @@ import { deckCardIds, normalizeDeck } from "../db.js";
 import { searchByName } from "../riftscribe.js";
 import { parseDecklist, resolveDecklist, resolveTTS } from "../decklist.js";
 import { cacheMany } from "./cardCacheService.js";
-import { persistAndBroadcast } from "./stateService.js";
+import { commit } from "./stateService.js";
 import { requirePlayer } from "./playerService.js";
 
 export async function previewDecklist({ format, text }) {
@@ -17,7 +17,7 @@ export async function savePlayerDeck(playerId, incoming = {}) {
   const deck = normalizeDeck(incoming);
   await cacheMany(deckCardIds(deck));
   player.deck = deck;
-  await persistAndBroadcast();
+  commit(["players"]);
   return deck;
 }
 

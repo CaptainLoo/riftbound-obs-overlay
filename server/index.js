@@ -12,6 +12,7 @@ import { startStreamDeckSafe, stopStreamDeckSafe } from "./streamdeckApi.js";
 import { clearAppPid, registerShutdownForUpdate, writeAppPid } from "./update-shutdown.js";
 import { readApplyStatus, readLastUpdate } from "./update-utils.js";
 import { compareSemver, getVersion } from "./version.js";
+import { flush } from "./persist.js";
 
 const DEFAULT_PORT = Number(process.env.PORT) || 7474;
 
@@ -84,6 +85,7 @@ export async function startServer(options = {}) {
 
   const close = async () => {
     await stopStreamDeckSafe({ quickClose: true });
+    await flush();
     clearAppPid();
     closeHub();
     if (typeof server.closeAllConnections === "function") {
@@ -123,8 +125,21 @@ const isDirectRun =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectRun) {
-  startServer().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  startServer()
+    .then(({ close }) => {
+      let closing = false;
+      const onSignal = () => {
+        if (closing) return;
+        closing = true;
+        close()
+          .catch((err) => console.error(err))
+          .finally(() => process.exit(0));
+      };
+      process.on("SIGINT", onSignal);
+      process.on("SIGTERM", onSignal);
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }
