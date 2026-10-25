@@ -5,12 +5,19 @@ export function mergeStatePatch(state, patch) {
   return { ...state, ...patch };
 }
 
+/**
+ * connectState(onState, { onPatch?, onMessage? })
+ *   onState(state, { type: "state" | "patch", sections })  — app state frames
+ *   onPatch(state, info)                                    — optional override for patch frames
+ *   onMessage(msg)                                          — any other frame (e.g. { type: "streamdeck" })
+ */
 export function connectState(onState, options = {}) {
   let socket = null;
   let retry = null;
   let state = null;
 
   const onPatch = options.onPatch || null;
+  const onMessage = options.onMessage || null;
 
   function open() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -27,6 +34,8 @@ export function connectState(onState, options = {}) {
           const info = { type: "patch", sections: msg.sections || Object.keys(msg.patch || {}) };
           if (onPatch) onPatch(state, info);
           else onState(state, info);
+        } else if (onMessage) {
+          onMessage(msg);
         }
       } catch {
         /* ignore malformed frames */
